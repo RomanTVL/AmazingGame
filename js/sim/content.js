@@ -38,6 +38,7 @@ export const PLANT_DEFAULTS = {
   workToHarvest: 120,
   biomes: ['forest'],
   light: null,
+  bake: true, // рисовать в кэш тайлов (статично); false — каждый кадр (анимация)
 };
 
 export const CORE_PLANTS = [
@@ -50,9 +51,9 @@ export const CORE_PLANTS = [
 
 export const CORE_BUILDINGS = [
   // природа
-  { id: 'rock', nameKey: 'building.rock', category: 'natural', natural: true, buildable: false, mineable: true, blocksVision: true, blocksLight: true, hp: 400, yield: { stone: 18 }, workToMine: 360, color: '#8d96b8' },
-  { id: 'ore_iron', nameKey: 'building.ore_iron', category: 'natural', natural: true, buildable: false, mineable: true, blocksVision: true, blocksLight: true, hp: 450, yield: { iron_ore: 14, stone: 4 }, workToMine: 460, color: '#e0915f' },
-  { id: 'mana_vein', nameKey: 'building.mana_vein', category: 'natural', natural: true, buildable: false, mineable: true, blocksVision: true, blocksLight: true, hp: 500, yield: { mana_crystal: 6 }, workToMine: 520, color: '#5ef2ff', light: { radius: 2.4, color: '#5ef2ff', intensity: 0.75, flicker: 0.15 } },
+  { id: 'rock', nameKey: 'building.rock', category: 'natural', natural: true, buildable: false, mineable: true, blocksVision: true, blocksLight: true, hp: 400, yield: { stone: 18 }, workToMine: 360, color: '#8d96b8', bake: true },
+  { id: 'ore_iron', nameKey: 'building.ore_iron', category: 'natural', natural: true, buildable: false, mineable: true, blocksVision: true, blocksLight: true, hp: 450, yield: { iron_ore: 14, stone: 4 }, workToMine: 460, color: '#e0915f', bake: true },
+  { id: 'mana_vein', nameKey: 'building.mana_vein', category: 'natural', natural: true, buildable: false, mineable: true, blocksVision: true, blocksLight: true, hp: 500, yield: { mana_crystal: 6 }, workToMine: 520, color: '#5ef2ff', bake: true, light: { radius: 2.4, color: '#5ef2ff', intensity: 0.75, flicker: 0.15 } },
   // поезд
   { id: 'wagon_wall', nameKey: 'building.wagon_wall', category: 'train', buildable: false, indestructible: true, blocksVision: true, blocksLight: true, hp: 2000, bake: true, placeableOn: 'wagon', connects: 'wall' },
   { id: 'wagon_window', nameKey: 'building.wagon_window', category: 'train', buildable: false, indestructible: true, blocksVision: false, blocksLight: false, hp: 1500, bake: true, placeableOn: 'wagon', connects: 'wall', window: true },

@@ -321,6 +321,24 @@ function registerInteractions(game) {
     },
   });
 
+  reg.add({
+    id: 'sleep',
+    order: 90,
+    find(game, p, tx, ty) {
+      if ((p.needs.rest ?? 1) > 0.35) return null;
+      const map = game.map;
+      const b = map.buildingAt(tx, ty);
+      const bed = b && game.defs.buildings.get(b.defId)?.bed ? b : null;
+      if (!bed && (!map.isRoofed(tx, ty) || !map.isPassable(tx, ty) || b)) return null;
+      return {
+        label: game.t('act.sleep'),
+        x: tx,
+        y: ty,
+        run: (g, pawn) => g.jobs.startManual(pawn, 'sleep', { x: tx, y: ty, data: { bedId: bed?.id || 0 } }),
+      };
+    },
+  });
+
   // служебные задачи лидера
   game.jobs.registerJobType({
     id: 'player_pickup',

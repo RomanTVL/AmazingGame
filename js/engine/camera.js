@@ -60,6 +60,7 @@ export class Camera {
       this.y = damp(this.y, ty, 6, dt);
     }
     this.zoom = damp(this.zoom, this.targetZoom, 10, dt);
+    if (Math.abs(this.zoom - this.targetZoom) < 0.002) this.zoom = this.targetZoom;
     if (this.shake > 0) {
       const s = this.shake * this.shake * 0.35;
       this.shakeX = (Math.random() * 2 - 1) * s;

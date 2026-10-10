@@ -32,7 +32,7 @@ export const RU = {
   },
   act: {
     chop: 'Срубить: {name}', harvest: 'Собрать: {name}', mine: 'Добыть: {name}', eat: 'Съесть: {name}',
-    pickup: 'Взять: {name} ×{count}', drop: 'Бросить: {name}', store: 'Положить на склад: {name}',
+    pickup: 'Взять: {name} ×{count}', drop: 'Бросить: {name}', store: 'Положить на склад: {name}', sleep: 'Лечь спать',
   },
   health: { ok: 'Здоров', hurt: 'Ранен', critical: 'При смерти' },
   needs: { food: 'Сытость', rest: 'Бодрость' },
@@ -45,7 +45,7 @@ export const RU = {
     designate: 'C + ЛКМ — пометить (рубить/собрать/добыть), C + ПКМ — снять',
   },
   hud: {
-    day: 'День {day}', paused: 'ПАУЗА', leader: 'Лидер', heir: 'Наследник', carrying: 'Несёт: {name} ×{count}',
+    day: 'День {day}', paused: 'ПАУЗА', hungry: 'Вы голодны — подойдите к еде и нажмите E', tired: 'Вы устали — лягте спать в вагоне (E)', leader: 'Лидер', heir: 'Наследник', carrying: 'Несёт: {name} ×{count}',
     controls: 'WASD идти · E действие · C+мышь пометить · Пробел пауза · +/− скорость · колесо зум · F9 отладка',
     seasons: { spring: 'весна', summer: 'лето', autumn: 'осень', winter: 'зима' },
   },
@@ -93,7 +93,7 @@ export const EN = {
   },
   act: {
     chop: 'Chop: {name}', harvest: 'Harvest: {name}', mine: 'Mine: {name}', eat: 'Eat: {name}',
-    pickup: 'Pick up: {name} ×{count}', drop: 'Drop: {name}', store: 'Store: {name}',
+    pickup: 'Pick up: {name} ×{count}', drop: 'Drop: {name}', store: 'Store: {name}', sleep: 'Go to sleep',
   },
   health: { ok: 'Healthy', hurt: 'Wounded', critical: 'Dying' },
   needs: { food: 'Food', rest: 'Rest' },
@@ -106,7 +106,7 @@ export const EN = {
     designate: 'C + LMB — designate (chop/harvest/mine), C + RMB — clear',
   },
   hud: {
-    day: 'Day {day}', paused: 'PAUSED', leader: 'Leader', heir: 'Heir', carrying: 'Carrying: {name} ×{count}',
+    day: 'Day {day}', paused: 'PAUSED', hungry: 'You are hungry — walk to food and press E', tired: 'You are tired — sleep inside a wagon (E)', leader: 'Leader', heir: 'Heir', carrying: 'Carrying: {name} ×{count}',
     controls: 'WASD walk · E act · C+mouse designate · Space pause · +/− speed · wheel zoom · F9 debug',
     seasons: { spring: 'spring', summer: 'summer', autumn: 'autumn', winter: 'winter' },
   },

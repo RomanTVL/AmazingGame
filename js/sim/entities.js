@@ -23,7 +23,17 @@ export class EntityManager {
     this.tileIndex = new Map();
     /** Чанки: key → Set сущностей (все виды) */
     this.buckets = new Map();
-    this.registerKind('pawn', { static: false, transient: ['job', 'path', 'pathI', 'moveInput', 'workProgress'] });
+    this.registerKind('pawn', {
+      static: false,
+      transient: ['job', 'path', 'pathI', 'pathGoal', 'moveInput', 'workProgress'],
+      restore: (e) => {
+        e.moveInput = { x: 0, y: 0 };
+        e.job = null;
+        e.path = null;
+        e.pathI = 0;
+        e.asleep = false;
+      },
+    });
     this.registerKind('item', { static: true, defs: 'items' });
     this.registerKind('building', { static: true, defs: 'buildings' });
     this.registerKind('plant', { static: true, defs: 'plants' });
@@ -35,12 +45,20 @@ export class EntityManager {
   /**
    * Новый вид сущностей.
    * @param {string} id
-   * @param {{static?: boolean, defs?: string, transient?: string[], saved?: boolean}} opts
+   * @param {{static?: boolean, defs?: string, transient?: string[], saved?: boolean, restore?: (e) => void}} opts
    *   static — индексировать по клетке; defs — имя реестра game.defs для defOf();
-   *   transient — поля, которые не сохраняются; saved=false — вид вообще не сохраняется.
+   *   transient — поля, которые не сохраняются; saved=false — вид вообще не сохраняется;
+   *   restore(e) — восстановить runtime-поля после загрузки.
    */
   registerKind(id, opts = {}) {
-    this.kinds.set(id, { id, static: !!opts.static, defs: opts.defs || null, transient: opts.transient || [], saved: opts.saved !== false });
+    this.kinds.set(id, {
+      id,
+      static: !!opts.static,
+      defs: opts.defs || null,
+      transient: opts.transient || [],
+      saved: opts.saved !== false,
+      restore: opts.restore || null,
+    });
     if (!this.byKind.has(id)) this.byKind.set(id, new Map());
   }
 
@@ -321,6 +339,7 @@ export class EntityManager {
       const k = this.kinds.get(o.kind);
       if (!k) continue;
       const e = JSON.parse(JSON.stringify(o));
+      k.restore?.(e);
       this._add(e, k);
     }
     this.nextId = Math.max(this.nextId, data.nextId);

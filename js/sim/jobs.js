@@ -766,6 +766,7 @@ export function cutPlant(game, plant, pawn, harvestOnly) {
   const yieldTable = harvestOnly ? def.harvestYield : def.yield;
   if (harvestOnly && def.harvestYield) {
     plant.growth = 0;
+    game.designations.removeTargetType(plant.id, 'harvest');
     game.map.touch(x, y);
   } else {
     game.entities.remove(plant, 'cut');

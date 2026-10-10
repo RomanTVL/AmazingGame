@@ -5,6 +5,7 @@
 // Реестр (RenderRegistry) существует и в headless (регистрация без отрисовки).
 import { Registry } from '../core/registry.js';
 import { TILE } from '../core/constants.js';
+import { LIGHT_SCALE } from './lighting.js';
 
 export const LAYER = Object.freeze({
   GROUND: 0, WATER_FX: 10, ZONES: 20, DECALS: 30, ITEMS: 40, PLANTS: 45, BUILDINGS: 50, CORPSES: 55,
@@ -52,17 +53,39 @@ export class RenderRegistry {
   }
 }
 
+/**
+ * Рендер в браузере. Три канваса (композитор браузера смешивает их):
+ *   base  — мир и всё с order ≤ LIGHTING (90);
+ *   light — карта освещённости (CSS mix-blend-mode: multiply), видна только когда темно;
+ *   top   — слои с order > 90 (неон поверх темноты, туман, пометки, оверлеи, UI, курсор).
+ * Днём (темноты нет) всё рисуется в base, light/top скрыты.
+ */
 export class Renderer {
   constructor(game, canvas) {
     this.game = game;
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d', { alpha: false });
+    this.light = this._overlay('light', 'multiply');
+    this.top = this._overlay('top', 'normal');
+    this.topCtx = this.top.getContext('2d');
+    this.split = false;
     this.dpr = 1;
     this.time = 0;
     this.frameNo = 0;
     this.view = null;
     this.resize();
     window.addEventListener('resize', () => this.resize());
+  }
+
+  _overlay(id, blend) {
+    const c = document.createElement('canvas');
+    c.id = `game-${id}`;
+    Object.assign(c.style, {
+      position: 'fixed', left: '0', top: '0', width: '100vw', height: '100vh',
+      pointerEvents: 'none', mixBlendMode: blend, display: 'none',
+    });
+    this.canvas.after(c);
+    return c;
   }
 
   resize() {
@@ -74,6 +97,10 @@ export class Renderer {
     this.canvas.height = Math.floor(h * dpr);
     this.canvas.style.width = `${w}px`;
     this.canvas.style.height = `${h}px`;
+    this.top.width = this.canvas.width;
+    this.top.height = this.canvas.height;
+    this.light.width = Math.ceil(w * LIGHT_SCALE);
+    this.light.height = Math.ceil(h * LIGHT_SCALE);
     this.w = w;
     this.h = h;
     this.game.camera.setViewport(w, h);
@@ -107,35 +134,54 @@ export class Renderer {
     };
   }
 
+  _setSplit(on) {
+    if (on === this.split) return;
+    this.split = on;
+    this.light.style.display = on ? 'block' : 'none';
+    this.top.style.display = on ? 'block' : 'none';
+  }
+
   frame(dt) {
     const game = this.game;
     this.time += dt;
     this.frameNo++;
-    const ctx = this.ctx;
     const view = this.computeView(dt);
     this.view = view;
+    const lighting = game.render.lighting;
+    const split = !!lighting && lighting.darkness(view) >= 0.01;
+    this._setSplit(split);
+    if (lighting) lighting.domCanvas = split ? this.light : null;
     const dpr = this.dpr;
+    const base = this.ctx;
+    const top = this.topCtx;
     const biome = game.map && game.defs.biomes.get(game.map.biome);
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.globalAlpha = 1;
-    ctx.globalCompositeOperation = 'source-over';
-    ctx.fillStyle = biome?.palette?.bg || '#04060c';
-    ctx.fillRect(0, 0, this.w, this.h);
+    base.setTransform(dpr, 0, 0, dpr, 0, 0);
+    base.globalAlpha = 1;
+    base.globalCompositeOperation = 'source-over';
+    base.fillStyle = biome?.palette?.bg || '#04060c';
+    base.fillRect(0, 0, this.w, this.h);
+    if (split) {
+      top.setTransform(1, 0, 0, 1, 0, 0);
+      top.clearRect(0, 0, this.top.width, this.top.height);
+    }
     const z = view.zoom * dpr;
     const tx = dpr * (this.w / 2 - view.camX * TILE * view.zoom);
     const ty = dpr * (this.h / 2 - view.camY * TILE * view.zoom);
     for (const layer of game.render.layers.all()) {
       if (!layer.enabled) continue;
+      const ctx = split && layer.order > LAYER.LIGHTING ? top : base;
       if (layer.space === 'world') {
         if (!game.map) continue;
         ctx.setTransform(z, 0, 0, z, tx, ty);
       } else ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.save();
+      const t0 = performance.now();
       try {
         layer.draw(ctx, game, view);
       } catch (err) {
         game.error(err, `render:${layer.id}`);
       }
+      layer.ms = (layer.ms ?? 0) * 0.95 + (performance.now() - t0) * 0.05;
       ctx.restore();
       ctx.globalAlpha = 1;
       ctx.globalCompositeOperation = 'source-over';
