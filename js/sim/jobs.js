@@ -7,7 +7,7 @@
 // Задачи (job) — runtime-объекты, НЕ сохраняются: после загрузки пешки найдут работу заново.
 import { EVENTS } from '../core/events.js';
 import { moveTo, stopMoving, pathDone } from './pawn.js';
-import { chebyshev } from '../core/math.js';
+import { chebyshev, safeNum } from '../core/math.js';
 
 export const CORE_WORK_TYPES = [
   { id: 'doctoring', order: 10, nameKey: 'work.doctoring', skill: 'medicine', defaultPriority: 2 },
@@ -311,6 +311,22 @@ export class DesignationManager {
     /** targetId → Set<designation> */
     this.byTarget = new Map();
     game.events.on(EVENTS.ENTITY_REMOVED, ({ entity }) => this.removeTarget(entity.id));
+    game.events.on(EVENTS.ENTITY_MOVED, ({ entity }) => this._targetMoved(entity));
+  }
+
+  /** Цель пометки переехала (setPosition): переносим её пометки на новую клетку. */
+  _targetMoved(entity) {
+    const set = this.byTarget.get(entity.id);
+    const map = this.game.map;
+    if (!set || !map) return;
+    for (const d of set) {
+      const m = this._map(d.type);
+      if (map.inBounds(d.x, d.y) && m.get(map.idx(d.x, d.y)) === d) m.delete(map.idx(d.x, d.y));
+      d.x = Math.floor(entity.x);
+      d.y = Math.floor(entity.y);
+      if (map.inBounds(d.x, d.y)) m.set(map.idx(d.x, d.y), d);
+      else set.delete(d);
+    }
   }
 
   /**
@@ -378,9 +394,10 @@ export class DesignationManager {
     const set = this.byTarget.get(targetId);
     if (!set) return;
     this.byTarget.delete(targetId);
+    const map = this.game.map;
     for (const d of set) {
       const m = this._map(d.type);
-      m.delete(this.game.map.idx(d.x, d.y));
+      if (map) m.delete(map.idx(d.x, d.y));
       this.game.events.emit(EVENTS.DESIGNATION_REMOVED, { type: d.type, x: d.x, y: d.y });
     }
   }
@@ -531,7 +548,7 @@ export const CORE_TOILS = [
       const ty = t ? t.y + (t.h || 1) / 2 : (toil.y ?? job.y) + 0.5;
       if (Math.abs(tx - pawn.x) + Math.abs(ty - pawn.y) > 0.05) pawn.dir = Math.atan2(ty - pawn.y, tx - pawn.x);
       const wt = toil.workType || job.workType;
-      let speed = game.api.health.workSpeedFactor(pawn) * (wt ? game.api.mind.skillFactor(pawn, wt) : 1);
+      let speed = safeNum(game.api.health.workSpeedFactor(pawn), 0, 10) * (wt ? safeNum(game.api.mind.skillFactor(pawn, wt), 0, 10) : 1);
       if (pawn.isLeader && pawn.controlled === 'player') speed *= 1.25; // лидер работает азартнее
       toil._p += speed * dt * 60;
       const total = Math.max(1, toil.ticks || 60);

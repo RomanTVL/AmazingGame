@@ -5,9 +5,12 @@
 //
 // Взаимодействия (E) расширяемы: game.defs.interactions —
 //   {id, order, find(game, pawn, tx, ty) → {label, run(game, pawn), x?, y?} | null}
+// Удерживаемые (лопата, нести, сесть, канал заклинания): def или результат find с
+//   {hold: true, onHoldStart(game, pawn), onHoldTick?(game, pawn, heldMs, dtReal), onRelease(game, pawn, heldMs)}
+// — run не вызывается; пока E зажата, цель не меняется; отпускание/потеря фокуса/смерть → onRelease.
 import { EVENTS } from '../core/events.js';
-import { clamp, dist } from '../core/math.js';
-import { moveTo, stopMoving } from '../sim/pawn.js';
+import { clamp, dist, safeNum } from '../core/math.js';
+import { moveTo, stopMoving, sanitizePosition } from '../sim/pawn.js';
 import { resKey } from '../sim/jobs.js';
 
 export const PLAYER_KEYS = [
@@ -30,6 +33,16 @@ export const RESERVED_PLAYER_KEYS = [
   ['player:dash', 'ShiftLeft', 'input.dash', 'combat'],
 ];
 
+/**
+ * Клавиши модулей, которые ядро регистрирует заранее (раскладка едина, имена событий — 'journey:*').
+ * Пространство имён действий 'journey:', владелец — модуль train (локомотив).
+ */
+export const RESERVED_MODULE_KEYS = [
+  ['journey:horn', 'KeyH', 'input.horn', 'train'],
+  ['journey:regUp', 'BracketRight', 'input.regUp', 'train'],
+  ['journey:regDown', 'BracketLeft', 'input.regDown', 'train'],
+];
+
 const REACH = 1.75; // ближняя досягаемость (клетки)
 const HOVER_RANGE = 8; // наведённая цель в этом радиусе — лидер сам подойдёт
 
@@ -39,7 +52,36 @@ export class PlayerController {
     this.hint = null;
     this.tool = null; // {mode: 'add'|'remove', x0, y0}
     this.toolActive = false;
+    /**
+     * Временный инструмент пометок ядра (C + перетаскивание). Модуль build, заменяя его своим,
+     * ставит false и сам опрашивает game.input.isDown('player:designate').
+     */
+    this.coreDesignateTool = true;
+    /** Идущее удержание E: {hint, pawn, ms} | null */
+    this.holding = null;
     this._stepT = 0;
+  }
+
+  /** Сброс состояния ввода (новая игра / загрузка / потеря фокуса). */
+  reset() {
+    this.hint = null;
+    this.tool = null;
+    this.toolActive = false;
+    this.holding = null;
+  }
+
+  /** Завершить удержание E (если идёт): onRelease(game, pawn, heldMs) + событие 'player:interactEnd'. */
+  endHold() {
+    const h = this.holding;
+    if (!h) return;
+    this.holding = null;
+    const game = this.game;
+    try {
+      h.hint.onRelease?.(game, h.pawn, h.ms);
+    } catch (err) {
+      game.error(err, `interaction:${h.hint.id}`);
+    }
+    game.events.emit(EVENTS.PLAYER_INTERACT_END, { pawn: h.pawn, interaction: h.hint, heldMs: h.ms });
   }
 
   /** Пешка под управлением игрока (лидер или наследник). */
@@ -57,16 +99,23 @@ export class PlayerController {
   }
 
   // ---------- Кадр (ввод) ----------
-  frame() {
+  frame(dtReal = 0) {
     const game = this.game;
     const input = game.input;
     const p = this.pawn;
+    if (input.lostFocus) {
+      this.tool = null; // окно потеряло фокус посреди перетаскивания — отменяем
+      this.endHold();
+    }
     if (!p) {
       this.hint = null;
+      this.tool = null;
+      this.endHold();
       return;
     }
     if (game.ui.modalOpen) {
       p.moveInput.x = p.moveInput.y = 0;
+      this.endHold();
       return;
     }
     // движение
@@ -86,7 +135,8 @@ export class PlayerController {
     const overUI = game.ui.wantsMouse;
 
     // временный инструмент пометок (C + перетаскивание)
-    this.toolActive = input.isDown('player:designate');
+    this.toolActive = this.coreDesignateTool && input.isDown('player:designate');
+    if (!this.coreDesignateTool) this.tool = null;
     if (this.toolActive && !overUI) {
       if (!this.tool && input.keyPressed('Mouse0')) this.tool = { mode: 'add', x0: m.tx, y0: m.ty };
       if (!this.tool && input.keyPressed('Mouse2')) this.tool = { mode: 'remove', x0: m.tx, y0: m.ty };
@@ -99,12 +149,31 @@ export class PlayerController {
       }
     }
 
-    // взаимодействие
-    this.hint = this.findInteraction(p);
-    if (input.pressed('player:interact')) {
-      if (this.hint) {
-        this.hint.run(game, p);
-        game.events.emit(EVENTS.PLAYER_INTERACT, { pawn: p, interaction: this.hint });
+    // взаимодействие (тап — run; hold — onHoldStart … onRelease)
+    if (this.holding) {
+      const h = this.holding;
+      h.ms += (Number.isFinite(dtReal) ? dtReal : 0) * 1000;
+      if (h.pawn !== p || !input.isDown('player:interact')) this.endHold();
+      else {
+        try {
+          h.hint.onHoldTick?.(game, p, h.ms, dtReal);
+        } catch (err) {
+          game.error(err, `interaction:${h.hint.id}`);
+        }
+      }
+    } else this.hint = this.findInteraction(p);
+    if (!this.holding && input.pressed('player:interact')) {
+      const h = this.hint;
+      if (h) {
+        if (h.hold) {
+          this.holding = { hint: h, pawn: p, ms: 0 };
+          try {
+            h.onHoldStart?.(game, p);
+          } catch (err) {
+            game.error(err, `interaction:${h.id}`);
+          }
+        } else h.run?.(game, p);
+        game.events.emit(EVENTS.PLAYER_INTERACT, { pawn: p, interaction: h });
       } else game.audio.play('error');
     }
 
@@ -161,7 +230,12 @@ export class PlayerController {
       if (!game.api.vision.isVisible(tx, ty)) return null;
       for (const it of list) {
         const r = it.find(game, p, tx, ty);
-        if (r) return { ...r, id: it.id, tx, ty };
+        if (r) {
+          const out = { ...r, id: it.id, tx, ty };
+          if (it.hold && out.hold === undefined) out.hold = true;
+          for (const k of ['onHoldStart', 'onHoldTick', 'onRelease']) if (!out[k] && it[k]) out[k] = it[k];
+          return out;
+        }
       }
       return null;
     };
@@ -203,14 +277,15 @@ export class PlayerController {
     const p = this.pawn;
     const map = game.map;
     if (!p || !map || p.dead || p.downed) return;
-    const mx = p.moveInput.x;
-    const my = p.moveInput.y;
+    sanitizePosition(game, p);
+    const mx = safeNum(p.moveInput?.x, -1, 1, 0);
+    const my = safeNum(p.moveInput?.y, -1, 1, 0);
     if (!mx && !my) {
       if (!p.path) p.moving = false;
       return;
     }
     const cost = map.cost[map.idx(clamp(Math.floor(p.x), 0, map.w - 1), clamp(Math.floor(p.y), 0, map.h - 1))] || 1;
-    const speed = (p.speed * clamp(game.api.health.moveSpeedFactor(p), 0.05, 3)) / Math.max(0.6, cost);
+    const speed = (safeNum(p.speed, 0, 40, 4) * safeNum(game.api.health.moveSpeedFactor(p), 0.05, 3)) / Math.max(0.6, cost);
     const r = p.radius ?? 0.3;
     const stuck = this.collides(p.x, p.y, r);
     const nx = p.x + mx * speed * dt;
@@ -378,8 +453,9 @@ export function registerPlayer(game) {
   game.player = pc;
   for (const [a, k, label] of PLAYER_KEYS) game.input.registerKey(a, k, 'core', { label });
   for (const [a, k, label, owner] of RESERVED_PLAYER_KEYS) game.input.registerKey(a, k, owner, { label });
+  for (const [a, k, label, owner] of RESERVED_MODULE_KEYS) game.input.registerKey(a, k, owner, { label });
   registerInteractions(game);
-  game.frameSystems.add({ id: 'player', order: 30, update: () => pc.frame() });
+  game.frameSystems.add({ id: 'player', order: 30, update: (g, dt) => pc.frame(dt) });
   game.systems.add({ id: 'player', order: 15, update: (g, dt) => pc.step(dt) });
   // звук шагов лидера (косметика)
   game.frameSystems.add({

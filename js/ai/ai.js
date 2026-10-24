@@ -76,6 +76,8 @@ export function registerAI(game) {
           if ((tick + p.id) % 30 === 0) ai.think(p, true);
           continue;
         }
+        // груз без задачи (после загрузки сейва задачи не сохраняются) — положить, его отнесут на склад
+        if (p.carry) game.items.dropCarried(p);
         if (p._thinkCooldown > 0) {
           p._thinkCooldown--;
           continue;

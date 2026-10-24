@@ -16,15 +16,19 @@
  *  4. Вещества и зелья: употребление (задача 'ingest'), эффекты через game.api.health.addCondition(pawn, id, {severity})
  *     и game.api.mind.addThought; привыкание, ломка, передоз; политика употребления pawn.drugPolicy
  *     (never|party|break|free).
- *  5. Торговля: торговцы на станциях (journey шлёт 'journey:arrived'), панель торговли (T), валюта (предмет
- *     'silver' или кристаллы маны), цены от value; Инквизиция — конфискация веществ (по событию от journey).
+ *  5. Торговля: торговцы на станциях (journey шлёт 'journey:arrived'), панель торговли (T), валюта — предмет 'silver'
+ *     (зарегистрируйте его: стартовое серебро сценария scenario.silver ядро кладёт предметом 'silver', а пока его нет —
+ *     в game.colony.silver), цены от value; Инквизиция — обыск и конфискация веществ: startInspection(opts) →
+ *     'economy:inspectionStarted' {...opts} … 'economy:inspectionEnded' {found, fine}.
  *  6. API: game.provide('economy', { itemValue(defId), colonyWealth(), canAfford(cost), consume(cost, x, y),
- *     trade(trader, offer) }, 'economy'). Базовые операции с предметами — game.items (spawn/take/count/consume/findNearest).
+ *     isAddicted(pawn, kind), startInspection(opts), trade(trader, offer) }, 'economy').
+ *     Базовые операции с предметами — game.items (spawn/take/count/consume/findNearest).
  *  7. Склады: фильтры зон (zone.filter = {categories, items, deny}) — UI фильтров у build (зоны), логика — game.zones.accepts.
  *  8. Еда для mind: блюда с def.nutrition и foodKind 'meal' дают мысль 'ate_meal' (ядро уже вызывает).
  *
- * КЛАВИШИ (выделены): T — торговля, K — производство/заказы.
- * СОБЫТИЯ: 'economy:crafted' {pawn, recipeId, products}, 'economy:traded' {trader, gave, got}, 'economy:ingested' {pawn, defId}.
+ * КЛАВИШИ (выделены): T — торговля ('panel:trade'), K — производство/заказы ('panel:bills').
+ * СОБЫТИЯ: 'economy:crafted' {pawn, recipeId, products}, 'economy:traded' {trader, gave, got}, 'economy:ingested' {pawn, defId},
+ *          'economy:inspectionStarted' {...}, 'economy:inspectionEnded' {found, fine}.
  */
 export function register(game) {
   void game;

@@ -15,6 +15,14 @@ export class Clock {
     this._lastHour = -1;
   }
 
+  /** Новая игра: тик 0, 07:00 первого дня. */
+  reset() {
+    this.tick = 0;
+    this.startHour = 7;
+    this._lastHour = -1;
+    this._lastDay = undefined;
+  }
+
   get totalHours() {
     return this.startHour + this.tick / TICKS_PER_HOUR;
   }

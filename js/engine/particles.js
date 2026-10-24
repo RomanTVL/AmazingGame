@@ -6,6 +6,9 @@ import { glowSprite } from '../render/glow.js';
 import { TILE } from '../core/constants.js';
 
 const MAX = 3000;
+const num = (v, d) => (typeof v === 'number' && Number.isFinite(v) ? v : d);
+/** Предел различных цветов частиц (индекс — Uint16). Новые цвета сверх предела рисуются цветом #0 (белым). */
+const MAX_COLORS = 1024;
 
 export const CORE_FX_PRESETS = [
   { id: 'chips', emit: (fx, x, y, o = {}) => fx.emit(x, y, { count: 7, speed: 3, life: 0.5, size: 2.2, color: o.color || '#e0a060', gravity: 9, drag: 1.5, glow: false, ...o }) },
@@ -35,13 +38,16 @@ export class Particles {
     this.grow = new Float32Array(MAX);
     this.col = new Uint16Array(MAX);
     this.glow = new Uint8Array(MAX);
-    this.colors = [];
-    this.colorIdx = new Map();
+    this.colors = ['#ffffff'];
+    this.colorIdx = new Map([['#ffffff', 0]]);
+    /** Спрайт свечения на индекс цвета (без поиска по строке в горячем цикле). */
+    this.glowByColor = [];
   }
 
   _color(c) {
     let i = this.colorIdx.get(c);
     if (i === undefined) {
+      if (this.colors.length >= MAX_COLORS) return 0;
       i = this.colors.length;
       this.colors.push(c);
       this.colorIdx.set(c, i);
@@ -50,29 +56,35 @@ export class Particles {
   }
 
   emit(x, y, o = {}) {
-    if (!this.enabled) return;
-    const count = o.count ?? 8;
+    if (!this.enabled || !Number.isFinite(x) || !Number.isFinite(y)) return;
+    const count = Math.min(MAX, o.count ?? 8);
     const ci = this._color(o.color || '#ffffff');
     for (let k = 0; k < count; k++) {
       if (this.n >= MAX) return;
       const i = this.n++;
-      const ang = (o.angle ?? 0) + (Math.random() - 0.5) * (o.spread ?? Math.PI * 2);
-      const sp = (o.speed ?? 2) * (0.4 + Math.random() * 0.8);
-      this.x[i] = x + (Math.random() - 0.5) * (o.jitter ?? 0.2);
-      this.y[i] = y + (Math.random() - 0.5) * (o.jitter ?? 0.2);
+      const ang = num(o.angle, 0) + (Math.random() - 0.5) * num(o.spread, Math.PI * 2);
+      const sp = num(o.speed, 2) * (0.4 + Math.random() * 0.8);
+      const jit = num(o.jitter, 0.2);
+      this.x[i] = x + (Math.random() - 0.5) * jit;
+      this.y[i] = y + (Math.random() - 0.5) * jit;
       this.vx[i] = Math.cos(ang) * sp;
       this.vy[i] = Math.sin(ang) * sp;
-      const life = (o.life ?? 0.6) * (0.7 + Math.random() * 0.6);
+      const life = Math.max(0.01, Math.min(30, num(o.life, 0.6))) * (0.7 + Math.random() * 0.6);
       this.life[i] = life;
       this.max[i] = life;
-      this.size[i] = (o.size ?? 2) * (0.7 + Math.random() * 0.6);
-      this.grav[i] = o.gravity ?? 0;
-      this.drag[i] = o.drag ?? 2;
-      this.alpha[i] = o.alpha ?? 1;
-      this.grow[i] = o.grow ?? 0;
+      this.size[i] = num(o.size, 2) * (0.7 + Math.random() * 0.6);
+      this.grav[i] = num(o.gravity, 0);
+      this.drag[i] = num(o.drag, 2);
+      this.alpha[i] = num(o.alpha, 1);
+      this.grow[i] = num(o.grow, 0);
       this.col[i] = ci;
       this.glow[i] = o.glow === false ? 0 : 1;
     }
+  }
+
+  /** Убрать все частицы (новая игра / смена карты). */
+  clear() {
+    this.n = 0;
   }
 
   preset(id, x, y, opts) {
@@ -135,7 +147,8 @@ export class Particles {
       const c = this.colors[this.col[i]];
       ctx.globalAlpha = a;
       if (glowPass) {
-        const g = glowSprite(c, 16);
+        const ci = this.col[i];
+        const g = this.glowByColor[ci] || (this.glowByColor[ci] = glowSprite(c, 16));
         const r = s * 3.2;
         ctx.drawImage(g, x * TILE - r, y * TILE - r, r * 2, r * 2);
         ctx.fillStyle = '#ffffff';

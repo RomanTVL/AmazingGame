@@ -1,6 +1,7 @@
 // A* по сетке клеток (8 направлений, без срезания углов) + регионы связности.
 // Стоимость клетки — map.cost (0 = непроходимо; двери проходимы с pathCost).
-// Кэш путей сбрасывается при изменении map.version. Регионы (4-связность) пересчитываются лениво:
+// Кэш путей и регионы сбрасываются при изменении map.costVersion (реальная смена стоимости/проходимости
+// клеток) или при смене карты. Регионы (4-связность) пересчитываются лениво:
 // при запрете срезания углов 4-связность = достижимость по 8 направлениям.
 import { octile } from '../core/math.js';
 
@@ -13,6 +14,7 @@ export class Pathfinder {
   constructor(game) {
     this.game = game;
     this.n = 0;
+    this.mapRef = null;
     this.cache = new Map();
     this.cacheVersion = -1;
     this.regionVersion = -1;
@@ -22,6 +24,11 @@ export class Pathfinder {
   _ensure() {
     const map = this.game.map;
     if (!map) return false;
+    if (this.mapRef !== map) {
+      this.mapRef = map;
+      this.cacheVersion = -1;
+      this.regionVersion = -1;
+    }
     if (this.n !== map.n) {
       this.n = map.n;
       this.g = new Float32Array(map.n);
@@ -32,12 +39,13 @@ export class Pathfinder {
       this.gen = 0;
       this.heapI = new Int32Array(map.n * 4);
       this.heapF = new Float32Array(map.n * 4);
+      this.stack = new Int32Array(map.n);
       this.regionVersion = -1;
       this.cache.clear();
     }
-    if (this.cacheVersion !== map.version) {
+    if (this.cacheVersion !== map.costVersion) {
       this.cache.clear();
-      this.cacheVersion = map.version;
+      this.cacheVersion = map.costVersion;
     }
     return true;
   }
@@ -46,14 +54,14 @@ export class Pathfinder {
   _ensureRegions() {
     if (!this._ensure()) return;
     const map = this.game.map;
-    if (this.regionVersion === map.version) return;
-    this.regionVersion = map.version;
+    if (this.regionVersion === map.costVersion) return;
+    this.regionVersion = map.costVersion;
     const reg = this.regions;
     reg.fill(0);
     const w = map.w;
     const h = map.h;
     const cost = map.cost;
-    const stack = new Int32Array(map.n);
+    const stack = this.stack;
     let rid = 0;
     for (let s = 0; s < map.n; s++) {
       if (reg[s] || cost[s] <= 0) continue;

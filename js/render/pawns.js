@@ -4,7 +4,7 @@
 // id отрисовщика из game.render.defDrawers (например, враги: pawn.defId = 'enemy_ghoul' + registerDefDrawer).
 import { TILE } from '../core/constants.js';
 import { drawGlow } from './glow.js';
-import { rgba, mix } from './color.js';
+import { rgba, mix, lighten } from './color.js';
 import { itemSprite } from './entities.js';
 
 const SKIN = '#e9cfb4';
@@ -123,6 +123,9 @@ export function drawLeader(ctx, p, game, view) {
   const bob = walkBob(p, view);
   const dir = p.dir || 0;
   const color = p.color || '#c9b8ff';
+  const look = p.look || {};
+  const crystal = typeof look.crystal === 'string' ? look.crystal : '#5ef2ff';
+  const curlLen = Number.isFinite(look.curlLen) ? Math.max(0.6, Math.min(1.4, look.curlLen)) : 1;
   drawShadow(ctx, x, y, 11, 5);
   ctx.save();
   ctx.translate(x, y - Math.abs(bob) * 1.3);
@@ -190,8 +193,8 @@ export function drawLeader(ctx, p, game, view) {
   ctx.fill();
   // кристалл на посохе
   const pulse = 0.8 + Math.sin(t * 4) * 0.2;
-  drawGlow(ctx, sx, sy, 16 * pulse, '#5ef2ff', 0.9);
-  ctx.fillStyle = '#d8fcff';
+  drawGlow(ctx, sx, sy, 16 * pulse, crystal, 0.9);
+  ctx.fillStyle = lighten(crystal, 0.75);
   ctx.beginPath();
   ctx.moveTo(sx + Math.cos(dir) * 4.5, sy + Math.sin(dir) * 4.5);
   ctx.lineTo(sx + Math.cos(dir + 1.57) * 2.5, sy + Math.sin(dir + 1.57) * 2.5);
@@ -206,20 +209,28 @@ export function drawLeader(ctx, p, game, view) {
   ctx.beginPath();
   ctx.arc(hcx, hcy, 5, 0, Math.PI * 2);
   ctx.fill();
-  // кудри: белые светящиеся завитки, шевелятся при ходьбе
+  if (look.scar) {
+    ctx.strokeStyle = 'rgba(150,60,70,0.9)';
+    ctx.lineWidth = 0.9;
+    ctx.beginPath();
+    ctx.moveTo(hcx + Math.cos(dir + 0.5) * 3.8, hcy + Math.sin(dir + 0.5) * 3.8);
+    ctx.lineTo(hcx + Math.cos(dir + 0.2) * 1.2, hcy + Math.sin(dir + 0.2) * 1.2);
+    ctx.stroke();
+  }
+  // кудри: белые светящиеся завитки, шевелятся при ходьбе (число и длина — pawn.look.curls/curlLen)
   drawGlow(ctx, hcx - Math.cos(dir) * 1.5, hcy - Math.sin(dir) * 1.5, 15, '#ffffff', 0.55);
   ctx.strokeStyle = '#ffffff';
   ctx.lineWidth = 1.25;
   ctx.lineCap = 'round';
   ctx.beginPath();
-  const N = 11;
+  const N = Number.isFinite(look.curls) ? Math.max(5, Math.min(9, Math.round(look.curls))) + 4 : 11;
   for (let i = 0; i < N; i++) {
     const a = dir + Math.PI * 0.42 + (i / (N - 1)) * Math.PI * 1.16;
     const wob = p.moving ? Math.sin(p.walkPhase * 2.2 + i * 1.3) * 1.1 : Math.sin(t * 2 + i * 1.7) * 0.35;
     const rr = 4.6 + (i % 2) * 1.1 + wob * 0.4;
     const cx = hcx + Math.cos(a) * rr + Math.cos(back) * wob * 0.5;
     const cy = hcy + Math.sin(a) * rr + Math.sin(back) * wob * 0.5;
-    curl(ctx, cx, cy, 2.1 + (i % 3) * 0.3, a + t * 0.5 + i);
+    curl(ctx, cx, cy, (2.1 + (i % 3) * 0.3) * curlLen, a + t * 0.5 + i);
   }
   // макушка — пара завитков сверху
   curl(ctx, hcx - Math.cos(dir) * 1.8, hcy - Math.sin(dir) * 1.8, 2.3, t * 0.7);
@@ -252,7 +263,7 @@ export const pawnDrawer = {
       const dir = p.dir || 0;
       const hx = Math.cos(dir + 1.1) * 8 + Math.cos(dir) * 13;
       const hy = Math.sin(dir + 1.1) * 8 + Math.sin(dir) * 13;
-      drawGlow(ctx, x + hx, y + hy, 26, '#5ef2ff', alpha * 0.8);
+      drawGlow(ctx, x + hx, y + hy, 26, typeof p.look?.crystal === 'string' ? p.look.crystal : '#5ef2ff', alpha * 0.8);
       drawGlow(ctx, x, y, 14, '#ffffff', alpha * 0.5);
     }
   },

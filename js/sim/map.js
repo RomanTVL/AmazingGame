@@ -50,8 +50,10 @@ export class TileMap {
     this.cost = new Float32Array(n);
     this.blocksVision = new Uint8Array(n);
     this.blocksLight = new Uint8Array(n);
-    /** Растёт при любом изменении проходимости/структуры. Кэши сверяются с ним. */
+    /** Растёт при любом изменении клеток (touch): кэши отрисовки/видимости сверяются с ним. */
     this.version = 0;
+    /** Растёт только когда реально меняется map.cost (проходимость/стоимость шага) — для кэшей A* и регионов. */
+    this.costVersion = 0;
     this._batch = 0;
     this._batchRect = null;
     this.railY = -1;
@@ -68,41 +70,49 @@ export class TileMap {
     return x >= 0 && y >= 0 && x < this.w && y < this.h;
   }
 
+  /** Определение ландшафта клетки (вне карты — первый тип, чтобы не падать). */
   terrainDef(x, y) {
-    return this.game.defs.terrain.byIndex(this.terrain[this.idx(x, y)]);
+    if (!this.inBounds(x, y)) return this.game.defs.terrain.byIndex(0);
+    return this.game.defs.terrain.byIndex(this.terrain[this.idx(x, y)]) || this.game.defs.terrain.byIndex(0);
   }
 
   floorDef(x, y) {
+    if (!this.inBounds(x, y)) return null;
     const f = this.floor[this.idx(x, y)];
     return f ? this.game.defs.floors.byIndex(f) : null;
   }
 
   setTerrain(x, y, id) {
+    if (!this.inBounds(x, y)) return;
     const i = this.idx(x, y);
     this.terrain[i] = this.game.defs.terrain.require(id).index;
     this.refresh(x, y);
   }
 
   setFloor(x, y, id) {
+    if (!this.inBounds(x, y)) return;
     const i = this.idx(x, y);
     this.floor[i] = id ? this.game.defs.floors.require(id).index : 0;
     this.refresh(x, y);
   }
 
   setRoof(x, y, v) {
+    if (!this.inBounds(x, y)) return;
     this.roof[this.idx(x, y)] = v;
     this.touch(x, y);
   }
 
   setRoom(x, y, roomId) {
+    if (!this.inBounds(x, y)) return;
     this.room[this.idx(x, y)] = roomId;
   }
 
   hasFlag(x, y, f) {
-    return (this.flags[this.idx(x, y)] & f) !== 0;
+    return this.inBounds(x, y) && (this.flags[this.idx(x, y)] & f) !== 0;
   }
 
   setFlag(x, y, f, on = true) {
+    if (!this.inBounds(x, y)) return;
     const i = this.idx(x, y);
     if (on) this.flags[i] |= f;
     else this.flags[i] &= ~f;
@@ -111,6 +121,7 @@ export class TileMap {
 
   /** Пересчитать производные слои клетки и отметить изменение. */
   refresh(x, y) {
+    if (!this.inBounds(x, y)) return;
     this._recompute(this.idx(x, y));
     this.touch(x, y);
   }
@@ -147,7 +158,9 @@ export class TileMap {
         if (pd.blocksVision) bv = 1;
       }
     }
+    const prev = this.cost[i];
     this.cost[i] = c;
+    if (this.cost[i] !== prev) this.costVersion++;
     this.blocksVision[i] = bv;
     this.blocksLight[i] = bl;
   }

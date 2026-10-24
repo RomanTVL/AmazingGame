@@ -2,6 +2,12 @@
 
 export const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 export const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
+/**
+ * Число из чужого кода (множители модулей и т.п.): не-число/NaN/±∞ → def, иначе clamp(v, min, max).
+ * Ядро прогоняет через неё результаты game.api.*Factor, чтобы ошибка модуля не превращала позиции в NaN.
+ */
+export const safeNum = (v, min = -Infinity, max = Infinity, def = 1) =>
+  typeof v === 'number' && Number.isFinite(v) ? (v < min ? min : v > max ? max : v) : def;
 export const lerp = (a, b, t) => a + (b - a) * t;
 export const invLerp = (a, b, v) => (b === a ? 0 : (v - a) / (b - a));
 export const smoothstep = (a, b, v) => {

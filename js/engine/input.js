@@ -30,6 +30,23 @@ export class Input {
     this.lastInputTime = 0;
     /** Текст, введённый в этом кадре (для полей ввода UI). */
     this.typed = '';
+    /** true в кадре, когда окно потеряло фокус / вкладка скрыта: отмените перетаскивания и «зажатые» режимы. */
+    this.lostFocus = false;
+    /** Владелец захвата текста (поле ввода UI) или null. Пока захвачено — действия молчат (кроме allowWhileTyping). */
+    this.textCapture = null;
+  }
+
+  /**
+   * Поле ввода UI (имя колонии, сид...) забирает клавиатуру: pressed/isDown/released всех действий
+   * возвращают false, кроме зарегистрированных с {allowWhileTyping: true} (Esc — 'ui:back').
+   * Набранный текст — this.typed ('\b' = Backspace), Enter — keyPressed('Enter').
+   */
+  captureText(owner = 'ui') {
+    this.textCapture = owner;
+  }
+
+  releaseText() {
+    this.textCapture = null;
   }
 
   // ---------- Реестр клавиш ----------
@@ -38,7 +55,8 @@ export class Input {
    * @param {string} action — 'модуль:действие'
    * @param {string|string[]} defaultKey
    * @param {string} owner — модуль
-   * @param {{label?: string, allowShared?: boolean}} [opts] — allowShared: сознательно делим клавишу (контекстно)
+   * @param {{label?: string, allowShared?: boolean, allowWhileTyping?: boolean}} [opts] — allowShared: сознательно
+   *   делим клавишу (контекстно); allowWhileTyping: действие работает и при захвате текста (captureText)
    * @returns {object} binding
    */
   registerKey(action, defaultKey, owner = 'core', opts = {}) {
@@ -50,7 +68,7 @@ export class Input {
     const defaults = Array.isArray(defaultKey) ? defaultKey : [defaultKey];
     const custom = this.game.settings?.get('keybinds')?.[action];
     const keys = custom ? (Array.isArray(custom) ? custom : [custom]) : defaults.slice();
-    const b = { action, keys, defaultKeys: defaults, owner, label: opts.label || action, allowShared: !!opts.allowShared };
+    const b = { action, keys, defaultKeys: defaults, owner, label: opts.label || action, allowShared: !!opts.allowShared, allowWhileTyping: !!opts.allowWhileTyping };
     for (const k of keys) {
       for (const other of this.bindings.values()) {
         if (other.keys.includes(k) && !(b.allowShared && other.allowShared)) {
@@ -64,7 +82,14 @@ export class Input {
     return b;
   }
 
-  /** Переназначить (UI настроек). Сохраняется в settings.keybinds. */
+  /** Снять действие (модуль заменяет действие ядра своим, например build — 'player:designate'). */
+  unregisterKey(action) {
+    const ok = this.bindings.delete(action);
+    if (ok) this.recomputeConflicts();
+    return ok;
+  }
+
+  /** Переназначить (UI настроек). Сохраняется в settings.keybinds. Конфликты пересчитываются. */
   rebind(action, keys) {
     const b = this.bindings.get(action);
     if (!b) return false;
@@ -72,7 +97,35 @@ export class Input {
     const kb = { ...(this.game.settings.get('keybinds') || {}) };
     kb[action] = b.keys;
     this.game.settings.set('keybinds', kb);
+    this.recomputeConflicts();
     return true;
+  }
+
+  /** Вернуть клавиши по умолчанию. */
+  resetBinding(action) {
+    const b = this.bindings.get(action);
+    if (!b) return false;
+    b.keys = b.defaultKeys.slice();
+    const kb = { ...(this.game.settings.get('keybinds') || {}) };
+    delete kb[action];
+    this.game.settings.set('keybinds', kb);
+    this.recomputeConflicts();
+    return true;
+  }
+
+  /** Пересчитать this.conflicts по текущим привязкам: [{key, a, b, owners}]. */
+  recomputeConflicts() {
+    const list = [...this.bindings.values()];
+    const out = [];
+    for (let i = 0; i < list.length; i++)
+      for (let j = i + 1; j < list.length; j++) {
+        const A = list[i];
+        const B = list[j];
+        if (A.allowShared && B.allowShared) continue;
+        for (const k of A.keys) if (B.keys.includes(k)) out.push({ key: k, a: A.action, b: B.action, owners: [A.owner, B.owner] });
+      }
+    this.conflicts = out;
+    return out;
   }
 
   keyOf(action) {
@@ -82,7 +135,7 @@ export class Input {
   /** Человекочитаемое имя клавиши: 'KeyE' → 'E'. */
   static keyLabel(k) {
     if (!k) return '';
-    return k.replace(/^Key/, '').replace(/^Digit/, '').replace('Mouse0', 'ЛКМ').replace('Mouse2', 'ПКМ').replace('Mouse1', 'СКМ').replace('Equal', '+').replace('Minus', '−').replace('Backquote', '`').replace('Escape', 'Esc');
+    return k.replace(/^Key/, '').replace(/^Digit/, '').replace('Mouse0', 'ЛКМ').replace('Mouse2', 'ПКМ').replace('Mouse1', 'СКМ').replace('Equal', '+').replace('Minus', '−').replace('Backquote', '`').replace('Escape', 'Esc').replace('BracketLeft', '[').replace('BracketRight', ']').replace(/^Numpad/, 'Num ');
   }
 
   labelOf(action) {
@@ -97,10 +150,14 @@ export class Input {
     return !this.mods.ctrl && !this.mods.alt;
   }
 
+  _blocked(b) {
+    return this.textCapture !== null && !b.allowWhileTyping;
+  }
+
   /** Удерживается ли действие. */
   isDown(action) {
     const b = this.bindings.get(action);
-    if (!b) return false;
+    if (!b || this._blocked(b)) return false;
     return b.keys.some((k) => this._match(k, this.down));
   }
 
@@ -108,13 +165,13 @@ export class Input {
   pressed(action) {
     if (this.consumed.has(action)) return false;
     const b = this.bindings.get(action);
-    if (!b) return false;
+    if (!b || this._blocked(b)) return false;
     return b.keys.some((k) => this._match(k, this.pressedSet));
   }
 
   released(action) {
     const b = this.bindings.get(action);
-    if (!b) return false;
+    if (!b || this._blocked(b)) return false;
     return b.keys.some((k) => this._match(k, this.releasedSet));
   }
 
@@ -182,15 +239,21 @@ export class Input {
         this.releasedSet.add(e.code);
       }
       this.lastInputTime = performance.now();
-      if (PREVENT.has(e.code) || (isDown && this._isBound(e.code) && !e.ctrlKey && !e.metaKey)) e.preventDefault();
+      if (PREVENT.has(e.code) || (isDown && (this.textCapture !== null || this._isBound(e.code)) && !e.ctrlKey && !e.metaKey && !/^F1[12]$/.test(e.code))) e.preventDefault();
       this.game.audio?.resume?.();
     };
     window.addEventListener('keydown', (e) => onKey(e, true));
     window.addEventListener('keyup', (e) => onKey(e, false));
-    window.addEventListener('blur', () => {
+    const releaseAll = () => {
       for (const c of this.down) this.releasedSet.add(c);
       this.down.clear();
       this.mods = { shift: false, ctrl: false, alt: false };
+      this.mouse.inside = false;
+      this.lostFocus = true;
+    };
+    window.addEventListener('blur', releaseAll);
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) releaseAll();
     });
     const pos = (e) => {
       const r = canvas.getBoundingClientRect();
@@ -249,5 +312,6 @@ export class Input {
     this.mouse.wheel = 0;
     this.mouse.moved = false;
     this.typed = '';
+    this.lostFocus = false;
   }
 }

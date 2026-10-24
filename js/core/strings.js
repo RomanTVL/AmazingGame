@@ -16,7 +16,7 @@ export const RU = {
   },
   wagon: {
     locomotive: 'Локомотив', residential: 'Жилой вагон', kitchen: 'Кухня', storage: 'Склад', workshop: 'Мастерская',
-    greenhouse: 'Теплица', infirmary: 'Лазарет', battle: 'Боевой вагон', hearse: 'Катафалк',
+    greenhouse: 'Теплица', infirmary: 'Лазарет', battle: 'Боевой вагон', hearse: 'Катафалк', unknown: 'Вагон',
   },
   biome: { forest: 'Лес Шёпота' },
   station: { start: 'Полустанок у Леса Шёпота' },
@@ -39,7 +39,18 @@ export const RU = {
   colony: {
     heir: '{dead} погиб. Власть переходит к наследнику: {heir}.',
     lost: 'Последний поезд опустел. Никого не осталось.',
+    defaultName: 'Последний поезд',
   },
+  scenario: {
+    standard: { name: 'Последний поезд', desc: 'Маг-проводник и четверо поселенцев, полный состав и скромные запасы.' },
+  },
+  difficulty: {
+    easy: { name: 'Мирный', desc: 'Редкие угрозы, щадящие события. Для стройки и историй.' },
+    normal: { name: 'Обычный', desc: 'Задуманный баланс: тяжело, но честно.' },
+    hard: { name: 'Тяжёлый', desc: 'Рейды чаще и злее, ошибки дорого стоят.' },
+    brutal: { name: 'Жестокий', desc: 'Частые рейды и беды. Гниль не ждёт.' },
+  },
+  save: { failed: 'Не удалось сохранить: хранилище браузера переполнено или недоступно.' },
   hint: {
     start: 'WASD — идти, E — действие рядом. Зажмите C и выделите деревья мышью — поселенцы срубят их.',
     designate: 'C + ЛКМ — пометить (рубить/собрать/добыть), C + ПКМ — снять',
@@ -58,7 +69,7 @@ export const RU = {
     up: 'Вверх', down: 'Вниз', left: 'Влево', right: 'Вправо', interact: 'Действие', designate: 'Пометки (временно)',
     orders: 'Приказы', call_to_arms: 'К оружию!', spell1: 'Заклинание 1', spell2: 'Заклинание 2', spell3: 'Заклинание 3', spell4: 'Заклинание 4',
     attack: 'Атака', dash: 'Рывок', pause: 'Пауза', faster: 'Быстрее', slower: 'Медленнее', speed1: 'Скорость 1', speed2: 'Скорость 2',
-    speed3: 'Скорость 3', debug: 'Отладка', back: 'Назад / меню',
+    speed3: 'Скорость 3', debug: 'Отладка', back: 'Назад / меню', horn: 'Гудок', regUp: 'Регулятор +', regDown: 'Регулятор −',
   },
 };
 
@@ -77,7 +88,7 @@ export const EN = {
   },
   wagon: {
     locomotive: 'Locomotive', residential: 'Living car', kitchen: 'Kitchen', storage: 'Storage', workshop: 'Workshop',
-    greenhouse: 'Greenhouse', infirmary: 'Infirmary', battle: 'Battle car', hearse: 'Hearse',
+    greenhouse: 'Greenhouse', infirmary: 'Infirmary', battle: 'Battle car', hearse: 'Hearse', unknown: 'Car',
   },
   biome: { forest: 'Whispering Woods' },
   station: { start: 'Whispering Woods halt' },
@@ -100,7 +111,18 @@ export const EN = {
   colony: {
     heir: '{dead} has died. Leadership passes to the heir: {heir}.',
     lost: 'The Last Train is empty. No one is left.',
+    defaultName: 'The Last Train',
   },
+  scenario: {
+    standard: { name: 'The Last Train', desc: 'The mage conductor, four colonists, a full consist and modest supplies.' },
+  },
+  difficulty: {
+    easy: { name: 'Peaceful', desc: 'Rare threats, gentle events. For building and stories.' },
+    normal: { name: 'Normal', desc: 'The intended balance: hard but fair.' },
+    hard: { name: 'Hard', desc: 'Raids come more often and hit harder; mistakes cost.' },
+    brutal: { name: 'Brutal', desc: 'Frequent raids and disasters. The Rot does not wait.' },
+  },
+  save: { failed: 'Could not save: browser storage is full or unavailable.' },
   hint: {
     start: 'WASD to walk, E to act. Hold C and drag over trees — colonists will chop them.',
     designate: 'C + LMB — designate (chop/harvest/mine), C + RMB — clear',
@@ -119,7 +141,7 @@ export const EN = {
     up: 'Up', down: 'Down', left: 'Left', right: 'Right', interact: 'Interact', designate: 'Designate (temp)',
     orders: 'Orders', call_to_arms: 'Call to arms!', spell1: 'Spell 1', spell2: 'Spell 2', spell3: 'Spell 3', spell4: 'Spell 4',
     attack: 'Attack', dash: 'Dash', pause: 'Pause', faster: 'Faster', slower: 'Slower', speed1: 'Speed 1', speed2: 'Speed 2',
-    speed3: 'Speed 3', debug: 'Debug', back: 'Back / menu',
+    speed3: 'Speed 3', debug: 'Debug', back: 'Back / menu', horn: 'Horn', regUp: 'Regulator +', regDown: 'Regulator −',
   },
 };
 

@@ -11,6 +11,7 @@ export class FogRenderer {
     this.game = game;
     this.canvas = null;
     this.key = '';
+    this.mapRef = null;
     this.memoryAlpha = 0.6;
   }
 
@@ -22,6 +23,10 @@ export class FogRenderer {
     const w = view.x1 - x0 + 1;
     const h = view.y1 - y0 + 1;
     if (w <= 0 || h <= 0) return;
+    if (this.mapRef !== game.map) {
+      this.mapRef = game.map;
+      this.key = '';
+    }
     const key = `${x0},${y0},${w},${h},${vision.version}`;
     if (!this.canvas || this.canvas.width !== w || this.canvas.height !== h) {
       this.canvas = makeCanvas(w, h);

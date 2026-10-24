@@ -9,6 +9,7 @@ import { SaveManager } from './save.js';
 import { createStorage } from './storage.js';
 import { createApi } from './api.js';
 import { DT, SPEEDS, FACTION } from './constants.js';
+import { safeNum } from './math.js';
 import { Clock } from '../sim/time.js';
 import { SystemRegistry } from '../sim/systems.js';
 import { EntityManager } from '../sim/entities.js';
@@ -22,6 +23,20 @@ import { UI } from '../engine/ui.js';
 import { AudioEngine } from '../engine/audio.js';
 import { Particles } from '../engine/particles.js';
 import { RenderRegistry } from '../render/renderer.js';
+import { startNewColony } from '../sim/colony.js';
+import { changeStation } from '../sim/station.js';
+
+/**
+ * Состояние колонии (сохраняется сериализатором 'meta'; JSON). Модули могут добавлять свои поля.
+ * authority 0..100 — авторитет лидера (mind), memory 0..100 — «память» колонии о павших (health),
+ * flags — флаги сценария/сюжета (scenario.flags сливаются сюда), objectives — цели для HUD (ui.setObjective).
+ */
+export function createColonyState() {
+  return {
+    leaderId: 0, heirId: 0, name: '', lost: false, scenarioId: '', difficulty: 'normal',
+    authority: 50, memory: 10, flags: {}, objectives: {},
+  };
+}
 
 export class Game {
   /**
@@ -61,7 +76,7 @@ export class Game {
     this.zones = new ZoneManager(this);
     this.items = new ItemManager(this);
     this.ai = new AIManager(this);
-    this.colony = { leaderId: 0, heirId: 0, name: '', lost: false };
+    this.colony = createColonyState();
     /** Видимость (модуль vision заменит). enabled=false → всё видно, туман не рисуется. */
     this.vision = {
       enabled: false,
@@ -91,6 +106,12 @@ export class Game {
     // время
     this.speed = 1;
     this.paused = false;
+    /** Базовый масштаб темпа симуляции (см. get timeScale); замедления — slowMo(). */
+    this._timeScale = 1;
+    /** id → {scale, leftMs} — активные замедления (реальное время). */
+    this._slowMos = new Map();
+    this._slowMoId = 0;
+    this._errCounts = new Map();
     this.initialized = false;
     this.modules = [];
   }
@@ -100,11 +121,26 @@ export class Game {
     return this.i18n.t(key, vars);
   }
 
-  /** Записать ошибку (не роняя игру). В тестах errors.length > 0 = провал. */
+  /**
+   * Записать ошибку (не роняя игру). В тестах errors.length > 0 = провал.
+   * Повторы одной и той же ошибки (слой/система падает каждый кадр) пишутся 3 раза, дальше только считаются
+   * (errorCounts), чтобы не завалить консоль.
+   */
   error(err, where = '?') {
-    this.errors.push({ where, message: String(err?.message || err), stack: err?.stack });
+    const message = String(err?.message || err);
+    const key = `${where}|${message}`;
+    const n = (this._errCounts.get(key) || 0) + 1;
+    if (this._errCounts.size > 500) this._errCounts.clear();
+    this._errCounts.set(key, n);
+    if (n > 3) return;
+    this.errors.push({ where, message, stack: err?.stack });
     if (this.errors.length > 200) this.errors.shift();
-    console.error(`[game:${where}]`, err);
+    console.error(`[game:${where}]${n === 3 ? ' (дальнейшие повторы скрыты)' : ''}`, err);
+  }
+
+  /** Сколько раз случалась каждая ошибка: Map 'where|message' → count. */
+  get errorCounts() {
+    return this._errCounts;
   }
 
   /**
@@ -113,6 +149,12 @@ export class Game {
   provide(ns, impl, owner = ns) {
     this.api[ns] ||= {};
     for (const [k, fn] of Object.entries(impl)) {
+      if (typeof fn !== 'function') {
+        this.error(new Error(`[api] ${ns}.${k} от ${owner}: нужна функция — пропущено`), 'provide');
+        continue;
+      }
+      const prev = this.providers[ns]?.[k];
+      if (prev && prev !== owner) console.warn(`[api] ${ns}.${k}: реализация ${prev} заменена реализацией ${owner}`);
       this.api[ns][k] = fn;
       (this.providers[ns] ||= {})[k] = owner;
     }
@@ -140,22 +182,82 @@ export class Game {
     this.pathfinder.n = 0;
   }
 
-  /** Очистить мир перед новой колонией / загрузкой. */
-  resetWorld() {
-    if (this.train) this.train = null;
+  /**
+   * Новая игра без перезагрузки страницы (главное меню модуля ui):
+   *   game.newGame({ seed, scenarioId, difficulty, colonyName, leaderName, ... })
+   * Полностью заменяет мир; см. startNewColony (js/sim/colony.js) и docs/ARCHITECTURE.md «Новая игра».
+   */
+  newGame(opts = {}) {
+    return startNewColony(this, opts);
+  }
+
+  /** Переезд поезда на новую стоянку (модуль journey): см. js/sim/station.js. @returns {object} новая карта */
+  changeStation(opts = {}) {
+    return changeStation(this, opts);
+  }
+
+  /**
+   * Очистить мир перед новой колонией / загрузкой. Шлёт 'world:reset' {reason} — модули сбрасывают свои
+   * runtime-кэши (НЕ defs и не подписки).
+   * @param {'new'|'load'|string} [reason]
+   */
+  resetWorld(reason = 'new') {
+    this.train = null;
     this.entities.clear();
     this.designations.clear();
     this.zones.clear();
     this.jobs.reservations.clear();
     this.map = null;
-    this.colony = { leaderId: 0, heirId: 0, name: '', lost: false };
-    this.time.tick = 0;
-    this.time.startHour = 7;
+    this.colony = createColonyState();
+    this.time.reset();
+    this.log.length = 0;
+    for (const k of Object.keys(this.stats)) if (typeof this.stats[k] === 'number') this.stats[k] = 0;
+    this.fx.clear();
+    this.player?.reset?.();
+    this.camera.followId = 0;
+    this._slowMos.clear();
+    this.events.emit(EVENTS.WORLD_RESET, { reason });
   }
 
   // ---------- Время ----------
   get speedIndex() {
     return this.paused ? 0 : this.speed;
+  }
+
+  /**
+   * Темп симуляции относительно реального времени (множитель к game.speed в главном цикле браузера):
+   * базовый масштаб × самое сильное активное замедление slowMo. Кадровые системы/UI/камера идут в реальном времени.
+   * В headless ни на что не влияет (тики идут вызовами step()) — детерминизм не зависит от замедлений.
+   */
+  get timeScale() {
+    let min = 1;
+    for (const m of this._slowMos.values()) if (m.scale < min) min = m.scale;
+    return this._timeScale * min;
+  }
+
+  set timeScale(v) {
+    this._timeScale = safeNum(v, 0, 8, 1);
+  }
+
+  /**
+   * Замедлить время: scale 0..1 (0 — стоп-кадр) на realMs реальных миллисекунд (Infinity — до slowMoEnd).
+   * Одновременные запросы не складываются: действует самый медленный. @returns {number} id для slowMoEnd
+   * Примеры: колесо приказов 0.25 (Infinity), «хит-стоп» 0.05 на 60 мс, последний рейдер 0.3 на 600 мс.
+   */
+  slowMo(scale, realMs = Infinity) {
+    const id = ++this._slowMoId;
+    this._slowMos.set(id, { scale: safeNum(scale, 0, 1, 1), leftMs: realMs > 0 ? realMs : 0 });
+    return id;
+  }
+
+  /** Снять замедление по id. @returns {boolean} */
+  slowMoEnd(id) {
+    return this._slowMos.delete(id);
+  }
+
+  /** Описание сценария текущей колонии (game.defs.scenarios) или null. */
+  getScenario() {
+    return this.defs.scenarios?.get(this.colony.scenarioId) || null;
   }
 
   setSpeed(s) {
@@ -177,8 +279,15 @@ export class Game {
     this.systems.run(DT);
   }
 
-  /** Логика кадра (ввод, камера, UI): реальное dt. */
+  /** Логика кадра (ввод, камера, UI): реальное dt. Здесь же истекают замедления slowMo. */
   frame(dtReal) {
+    if (this._slowMos.size) {
+      const ms = (Number.isFinite(dtReal) ? dtReal : 0) * 1000;
+      for (const [id, m] of this._slowMos) {
+        m.leftMs -= ms;
+        if (m.leftMs <= 0) this._slowMos.delete(id);
+      }
+    }
     this.frameSystems.run(dtReal);
   }
 

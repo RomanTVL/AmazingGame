@@ -14,6 +14,7 @@ import * as economy from './modules/economy/index.js';
 import * as build from './modules/build/index.js';
 import * as combat from './modules/combat/index.js';
 import * as journey from './modules/journey/index.js';
+import * as train from './modules/train/index.js';
 import * as ui from './modules/ui/index.js';
 import * as av from './modules/av/index.js';
 
@@ -25,6 +26,7 @@ export const MODULES = [
   ['build', build],
   ['combat', combat],
   ['journey', journey],
+  ['train', train],
   ['ui', ui],
   ['av', av],
 ];

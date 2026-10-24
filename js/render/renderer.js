@@ -25,6 +25,18 @@ export class RenderRegistry {
     this.defDrawers = new Map();
     /** Поставщики источников света: {id, collect(game, view, out: Light[])} */
     this.lights = new Registry('lights');
+    /** Оверлеи пешек: {id, order, draw(ctx, pawn, view, game)} — сразу после тела каждой видимой пешки. */
+    this.pawnOverlays = new Registry('pawnOverlays', { sortBy: 'order', defaults: { order: 100, enabled: true } });
+  }
+
+  /**
+   * Нарисовать поверх пешки (мировые пиксели, как слой 'pawns'; центр пешки — pawn.x * TILE, pawn.y * TILE):
+   * кудри и глифы (av), облачка реплик (ui), позы, копоть. Вызывается для каждой видимой пешки сразу после её тела —
+   * вместо отдельного полного прохода по пешкам.
+   */
+  registerPawnOverlay(def, owner = 'core') {
+    if (typeof def.draw !== 'function') throw new Error(`[render] оверлей пешки ${def.id}: нужен draw()`);
+    return this.pawnOverlays.add(def, owner);
   }
 
   registerLayer(def, owner = 'core') {
@@ -88,19 +100,20 @@ export class Renderer {
     return c;
   }
 
+  /** Пересчитать размеры канвасов (окно, devicePixelRatio). Вызывается и по 'resize', и при расхождении в кадре. */
   resize() {
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     this.dpr = dpr;
-    const w = window.innerWidth;
-    const h = window.innerHeight;
+    const w = Math.max(1, window.innerWidth | 0);
+    const h = Math.max(1, window.innerHeight | 0);
     this.canvas.width = Math.floor(w * dpr);
     this.canvas.height = Math.floor(h * dpr);
     this.canvas.style.width = `${w}px`;
     this.canvas.style.height = `${h}px`;
     this.top.width = this.canvas.width;
     this.top.height = this.canvas.height;
-    this.light.width = Math.ceil(w * LIGHT_SCALE);
-    this.light.height = Math.ceil(h * LIGHT_SCALE);
+    this.light.width = Math.max(1, Math.ceil(w * LIGHT_SCALE));
+    this.light.height = Math.max(1, Math.ceil(h * LIGHT_SCALE));
     this.w = w;
     this.h = h;
     this.game.camera.setViewport(w, h);
@@ -143,6 +156,9 @@ export class Renderer {
 
   frame(dt) {
     const game = this.game;
+    // смена DPI (перенос окна на другой монитор, зум браузера) не всегда шлёт 'resize'
+    const dprNow = Math.min(window.devicePixelRatio || 1, 2);
+    if (dprNow !== this.dpr || Math.max(1, window.innerWidth | 0) !== this.w || Math.max(1, window.innerHeight | 0) !== this.h) this.resize();
     this.time += dt;
     this.frameNo++;
     const view = this.computeView(dt);

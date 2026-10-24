@@ -12,6 +12,10 @@ import { rgba, mix, hexToRgb } from './color.js';
 const CPX = CHUNK * TILE;
 const key = (cx, cy) => cx + cy * 1024;
 const MAX_CHUNKS = 72;
+/** Предел памяти кэша чанков (пикселей RGBA, ≈ ×4 байта). При крупном зуме чанков держим меньше. */
+const PIXEL_BUDGET = 48e6;
+/** Максимальный масштаб запекания (device px на мировой px); выше — чанк растягивается при выводе. */
+const MAX_BAKE_SCALE = 3;
 
 export class TileRenderer {
   constructor(game) {
@@ -94,9 +98,10 @@ export class TileRenderer {
     if (this.mapRef !== game.map) this.reset();
     const map = game.map;
     const s = view.zoom * view.dpr;
+    const bs = Math.min(MAX_BAKE_SCALE, s);
     // пере-запекаем под новый зум, когда он устоялся
-    if (Math.abs(s - this.targetScale) > 1e-6) {
-      this.targetScale = s;
+    if (Math.abs(bs - this.targetScale) > 1e-6) {
+      this.targetScale = bs;
       this.scaleSince = view.time;
     }
     if (this.scale !== this.targetScale && view.time - this.scaleSince > 0.25) {
@@ -131,10 +136,17 @@ export class TileRenderer {
         if (Math.abs(c.scale - s) < 1e-6) ctx.drawImage(c.canvas, Math.round(fx), Math.round(fy));
         else ctx.drawImage(c.canvas, fx, fy, c.canvas.width * (s / c.scale), c.canvas.height * (s / c.scale));
       }
-    // освобождаем дальние чанки
-    if (this.chunks.size > MAX_CHUNKS) {
-      const old = [...this.chunks.entries()].sort((a, b) => a[1].used - b[1].used);
-      for (let i = 0; i < old.length - MAX_CHUNKS; i++) this.chunks.delete(old[i][0]);
+    // освобождаем дальние чанки: не больше бюджета пикселей, но всегда не меньше видимых
+    const visible = (cx1 - cx0 + 1) * (cy1 - cy0 + 1);
+    const px = (Math.ceil(CPX * this.scale) + 1) ** 2;
+    const maxChunks = Math.max(visible + 8, Math.min(MAX_CHUNKS, Math.floor(PIXEL_BUDGET / px)));
+    if (this.chunks.size > maxChunks) {
+      const old = [...this.chunks.entries()].filter((en) => en[1].used !== frame).sort((a, b) => a[1].used - b[1].used);
+      let n = this.chunks.size - maxChunks;
+      for (const [k] of old) {
+        if (n-- <= 0) break;
+        this.chunks.delete(k);
+      }
     }
   }
 
@@ -183,7 +195,7 @@ export class TileRenderer {
       const b = map.buildingAt(x, y);
       if (!b || b.x !== x || b.y !== y) return;
       const def = game.defs.buildings.get(b.defId);
-      if (!def?.bake) return;
+      if (!isBakedBuilding(game, def)) return;
       const dd = game.render.defDrawers.get(b.defId);
       const painter = def.paintBaked || dd?.paintBaked || (def.natural ? paintRock : paintWall);
       ctx.save();
@@ -345,6 +357,15 @@ export class TileRenderer {
       ctx.restore();
     }
   }
+}
+
+/**
+ * Запекается ли постройка в кэш тайлов: def.bake и есть чем запекать (def.paintBaked, paintBaked отрисовщика
+ * по defId или нет своего def.draw — тогда стена/скала ядра). Иначе её рисует слой 'buildings' каждый кадр.
+ */
+export function isBakedBuilding(game, def) {
+  if (!def?.bake) return false;
+  return !!(def.paintBaked || game.render.defDrawers.get(def.id)?.paintBaked || !def.draw);
 }
 
 // ---------- Запекаемые отрисовщики ядра ----------

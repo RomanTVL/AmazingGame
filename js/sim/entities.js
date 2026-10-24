@@ -66,11 +66,18 @@ export class EntityManager {
   spawn(kind, props = {}) {
     const k = this.kinds.get(kind);
     if (!k) throw new Error(`[entities] неизвестный вид ${kind}`);
-    const e = { id: this.nextId++, kind, x: 0, y: 0, ...props };
+    const e = { id: 0, x: 0, y: 0, ...props, kind };
+    if (!Number.isFinite(e.x) || !Number.isFinite(e.y)) {
+      // не роняем игру, но сообщаем (тесты падают при game.errors)
+      this.game.error(new Error(`[entities] spawn ${kind}${props.defId ? ':' + props.defId : ''}: нечисловая позиция (${props.x}, ${props.y})`), 'entities.spawn');
+      e.x = Number.isFinite(e.x) ? e.x : 0;
+      e.y = Number.isFinite(e.y) ? e.y : 0;
+    }
     if (props.id) {
+      if (this.byId.has(props.id)) throw new Error(`[entities] id ${props.id} уже занят`);
       e.id = props.id;
       this.nextId = Math.max(this.nextId, props.id + 1);
-    }
+    } else e.id = this.nextId++;
     this._add(e, k);
     this.game.events.emit(EVENTS.ENTITY_SPAWNED, { entity: e });
     return e;
@@ -79,8 +86,13 @@ export class EntityManager {
   _add(e, k) {
     this.byId.set(e.id, e);
     this.byKind.get(e.kind).set(e.id, e);
+    this._index(e, k);
+  }
+
+  /** Вписать сущность в пространственные индексы (слои карты, клетки, чанки). */
+  _index(e, k = this.kinds.get(e.kind)) {
     const map = this.game.map;
-    if (k.static) {
+    if (k?.static) {
       const tx = Math.floor(e.x);
       const ty = Math.floor(e.y);
       e.x = tx;
@@ -117,6 +129,45 @@ export class EntityManager {
     this._bucketAdd(e);
   }
 
+  /** Убрать сущность из пространственных индексов (обратное _index). */
+  _unindex(e, k = this.kinds.get(e.kind)) {
+    this._bucketRemove(e);
+    const map = this.game.map;
+    if (!k?.static || !map) return;
+    if (e.kind === 'building') {
+      map.batch(() => {
+        for (let j = 0; j < (e.h || 1); j++)
+          for (let i = 0; i < (e.w || 1); i++) {
+            const x = e.x + i;
+            const y = e.y + j;
+            if (!map.inBounds(x, y)) continue;
+            const idx = map.idx(x, y);
+            if (map.building[idx] === e.id) {
+              map.building[idx] = 0;
+              map.refresh(x, y);
+            }
+          }
+      });
+    } else if (e.kind === 'plant') {
+      if (map.inBounds(e.x, e.y)) {
+        const idx = map.idx(e.x, e.y);
+        if (map.plant[idx] === e.id) {
+          map.plant[idx] = 0;
+          map.refresh(e.x, e.y);
+        }
+      }
+    }
+    if (map.inBounds(e.x, e.y)) {
+      const idx = map.idx(e.x, e.y);
+      const arr = this.tileIndex.get(idx);
+      if (arr) {
+        const p = arr.indexOf(e);
+        if (p >= 0) arr.splice(p, 1);
+        if (arr.length === 0) this.tileIndex.delete(idx);
+      }
+    }
+  }
+
   _bucketAdd(e) {
     const key = BKEY(Math.floor(e.x / CHUNK), Math.floor(e.y / CHUNK));
     let b = this.buckets.get(key);
@@ -127,7 +178,10 @@ export class EntityManager {
 
   _bucketRemove(e) {
     const b = this.buckets.get(e._bucket);
-    if (b) b.delete(e);
+    if (b) {
+      b.delete(e);
+      if (b.size === 0) this.buckets.delete(e._bucket);
+    }
   }
 
   /** Сообщить, что динамичная сущность сдвинулась (обновление чанка). Дёшево, вызывать после движения. */
@@ -139,6 +193,34 @@ export class EntityManager {
     }
   }
 
+  /**
+   * Переместить сущность в (x, y) БЕЗ удаления/создания: тот же объект и id, пометки переезжают вместе с ней.
+   * Статичные (постройки, предметы, растения) переиндексируются; шлёт 'entity:moved' {entity, fromX, fromY}.
+   * Для пошагового движения пешек это не нужно (там p.x/p.y + moved(p)).
+   */
+  setPosition(e, x, y) {
+    if (!e || e.removed) return e;
+    if (!Number.isFinite(x) || !Number.isFinite(y)) {
+      this.game.error(new Error(`[entities] setPosition #${e.id}: нечисловая позиция (${x}, ${y})`), 'entities.setPosition');
+      return e;
+    }
+    const fromX = e.x;
+    const fromY = e.y;
+    const k = this.kinds.get(e.kind);
+    if (k?.static) {
+      this._unindex(e, k);
+      e.x = x;
+      e.y = y;
+      this._index(e, k);
+    } else {
+      e.x = x;
+      e.y = y;
+      this.moved(e);
+    }
+    this.game.events.emit(EVENTS.ENTITY_MOVED, { entity: e, fromX, fromY });
+    return e;
+  }
+
   /** Удалить сущность. reason — строка для подписчиков ('chopped', 'died', 'consumed', ...). */
   remove(e, reason = 'removed') {
     if (!e || e.removed) return;
@@ -146,43 +228,36 @@ export class EntityManager {
     const k = this.kinds.get(e.kind);
     this.byId.delete(e.id);
     this.byKind.get(e.kind)?.delete(e.id);
-    this._bucketRemove(e);
-    const map = this.game.map;
-    if (k?.static && map) {
-      if (e.kind === 'building') {
-        map.batch(() => {
-          for (let j = 0; j < (e.h || 1); j++)
-            for (let i = 0; i < (e.w || 1); i++) {
-              const x = e.x + i;
-              const y = e.y + j;
-              if (!map.inBounds(x, y)) continue;
-              const idx = map.idx(x, y);
-              if (map.building[idx] === e.id) {
-                map.building[idx] = 0;
-                map.refresh(x, y);
-              }
-            }
-        });
-      } else if (e.kind === 'plant') {
-        if (map.inBounds(e.x, e.y)) {
-          const idx = map.idx(e.x, e.y);
-          if (map.plant[idx] === e.id) {
-            map.plant[idx] = 0;
-            map.refresh(e.x, e.y);
-          }
-        }
-      }
-      if (map.inBounds(e.x, e.y)) {
-        const idx = map.idx(e.x, e.y);
-        const arr = this.tileIndex.get(idx);
-        if (arr) {
-          const p = arr.indexOf(e);
-          if (p >= 0) arr.splice(p, 1);
-          if (arr.length === 0) this.tileIndex.delete(idx);
-        }
-      }
-    }
+    this._unindex(e, k);
     this.game.events.emit(EVENTS.ENTITY_REMOVED, { entity: e, reason });
+  }
+
+  /**
+   * Отсоединить сущность от мира БЕЗ события (служебное: перенос поезда на новую карту, game.changeStation).
+   * Объект и id сохраняются; вернуть — attach(e).
+   */
+  detach(e) {
+    if (!e || e.removed || !this.byId.has(e.id)) return e;
+    this._unindex(e);
+    this.byId.delete(e.id);
+    this.byKind.get(e.kind)?.delete(e.id);
+    return e;
+  }
+
+  /**
+   * Вернуть отсоединённую сущность (с её id) на текущую карту по её e.x/e.y.
+   * Шлёт 'entity:spawned' (новая карта) или, если задан opts.movedFrom {x, y}, — 'entity:moved' (та же карта).
+   */
+  attach(e, opts = {}) {
+    const k = this.kinds.get(e.kind);
+    if (!k) throw new Error(`[entities] неизвестный вид ${e.kind}`);
+    if (this.byId.has(e.id)) throw new Error(`[entities] id ${e.id} уже занят`);
+    delete e.removed;
+    this.nextId = Math.max(this.nextId, e.id + 1);
+    this._add(e, k);
+    if (opts.movedFrom) this.game.events.emit(EVENTS.ENTITY_MOVED, { entity: e, fromX: opts.movedFrom.x, fromY: opts.movedFrom.y });
+    else this.game.events.emit(EVENTS.ENTITY_SPAWNED, { entity: e });
+    return e;
   }
 
   get(id) {
@@ -293,7 +368,9 @@ export class EntityManager {
     return rot % 2 === 1 ? [s[1], s[0]] : [s[0], s[1]];
   }
 
-  /** Переместить статичную сущность на новую клетку (переиндексация). */
+  /**
+   * УСТАРЕВШЕЕ: пересоздаёт объект (remove 'relocated' + spawn, пометки теряются). Используйте setPosition(e, x, y).
+   */
   relocate(e, x, y) {
     const props = { ...e };
     this.remove(e, 'relocated');
@@ -307,12 +384,13 @@ export class EntityManager {
     return ne;
   }
 
-  clear() {
+  /** Очистить всё без событий. opts.keepNextId — не сбрасывать счётчик id (смена станции). */
+  clear(opts = {}) {
     this.byId.clear();
     for (const m of this.byKind.values()) m.clear();
     this.tileIndex.clear();
     this.buckets.clear();
-    this.nextId = 1;
+    if (!opts.keepNextId) this.nextId = 1;
   }
 
   serialize() {

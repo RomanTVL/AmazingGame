@@ -15,10 +15,13 @@ export function makeCanvas(w, h) {
 }
 
 const cache = new Map();
+/** Предел числа спрайтов в кэше: при переполнении выбрасываются самые старые (защита от утечки памяти). */
+export const SPRITE_CACHE_MAX = 3000;
 
 /**
  * Получить закэшированный спрайт: key — уникальная строка, draw(ctx, w, h) рисует один раз.
  * Пример: sprite('tree:pine:3', 64, 64, (ctx) => {...})
+ * Ключ должен описывать ВСЁ, от чего зависит картинка (цвет, вариант, размер), и иметь конечное число значений.
  */
 export function sprite(key, w, h, draw) {
   let c = cache.get(key);
@@ -26,6 +29,13 @@ export function sprite(key, w, h, draw) {
     c = makeCanvas(w, h);
     const ctx = c.getContext('2d');
     draw(ctx, w, h);
+    if (cache.size >= SPRITE_CACHE_MAX) {
+      let drop = Math.ceil(SPRITE_CACHE_MAX / 10);
+      for (const k of cache.keys()) {
+        cache.delete(k);
+        if (--drop <= 0) break;
+      }
+    }
     cache.set(key, c);
   }
   return c;

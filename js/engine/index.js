@@ -18,7 +18,7 @@ export const CORE_KEYS = [
 export function registerEngineDefs(game) {
   for (const s of CORE_SFX) game.defs.sfx.add(s);
   for (const p of CORE_FX_PRESETS) game.defs.fxPresets.add(p);
-  for (const [a, k, label] of CORE_KEYS) game.input.registerKey(a, k, 'core', { label });
+  for (const [a, k, label] of CORE_KEYS) game.input.registerKey(a, k, 'core', { label, allowWhileTyping: a === 'ui:back' });
 
   const fs = game.frameSystems;
   fs.add({ id: 'mouse-world', order: 0, update: (g) => g.input.updateMouseWorld(g.camera) });
@@ -48,11 +48,21 @@ export function registerEngineDefs(game) {
     },
   });
   fs.add({ id: 'audio', order: 85, update: (g, dt) => g.audio.update(dt) });
-  fs.add({ id: 'particles', order: 90, update: (g, dt) => !g.isHeadless && g.fx.update(g.paused ? 0 : dt * g.speed) });
+  fs.add({ id: 'particles', order: 90, update: (g, dt) => !g.isHeadless && g.fx.update(g.paused ? 0 : dt * g.speed * g.timeScale) });
 
   game.events.on(EVENTS.SETTINGS_CHANGED, ({ key }) => {
     if (key.endsWith('Volume')) game.audio.applyVolumes();
   });
+
+  // камера — сразу к лидеру при новой игре, загрузке и смене станции
+  const snap = () => {
+    const l = game.getLeader();
+    game.camera.followId = 0;
+    if (l) game.camera.snapTo(l.x, l.y);
+  };
+  game.events.on(EVENTS.COLONY_STARTED, snap);
+  game.events.on(EVENTS.LOAD_AFTER, snap);
+  game.events.on(EVENTS.STATION_CHANGED, snap);
 
   registerFeedback(game);
 }

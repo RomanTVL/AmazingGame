@@ -19,6 +19,8 @@ export class Lighting {
     this.game = game;
     this.canvas = null;
     this.lights = [];
+    /** Пул объектов-источников (без аллокаций в кадре). */
+    this.pool = [];
     this.maxDarkness = 0.84;
     /** Если задано рендером — DOM-канвас с CSS multiply (тогда drawDarkness только обновляет его). */
     this.domCanvas = null;
@@ -29,24 +31,38 @@ export class Lighting {
     return view.night * this.maxDarkness;
   }
 
-  /** Собрать источники в видимой области (+ запас). */
+  /** Собрать источники в видимой области (+ запас). Объекты сущностей берутся из пула — не храните ссылки. */
   collect(view) {
     const game = this.game;
     const out = this.lights;
     out.length = 0;
+    const pool = this.pool;
+    let pi = 0;
+    const put = (x, y, L) => {
+      if (!L || !(L.radius > 0)) return;
+      const o = pool[pi] || (pool[pi] = { x: 0, y: 0, radius: 1, color: '#ffffff', intensity: 1, flicker: 0 });
+      pi++;
+      o.x = x;
+      o.y = y;
+      o.radius = L.radius;
+      o.color = L.color || '#ffffff';
+      o.intensity = L.intensity ?? 1;
+      o.flicker = L.flicker || 0;
+      out.push(o);
+    };
     const m = 8;
     for (const e of game.entities.queryRect(view.x0 - m, view.y0 - m, view.x1 + m, view.y1 + m)) {
       if (e.kind === 'pawn') {
-        if (e.light && !e.dead) out.push({ x: e.x, y: e.y, ...e.light });
+        if (e.light && !e.dead) put(e.x, e.y, e.light);
         continue;
       }
       if (e.light) {
-        out.push({ x: e.x + (e.w || 1) / 2, y: e.y + (e.h || 1) / 2, ...e.light });
+        put(e.x + (e.w || 1) / 2, e.y + (e.h || 1) / 2, e.light);
         continue;
       }
       if (e.kind !== 'building' && e.kind !== 'plant' && e.kind !== 'item') continue;
       const def = game.entities.defOf(e);
-      if (def?.light) out.push({ x: e.x + (e.w || 1) / 2, y: e.y + (e.h || 1) / 2, ...def.light });
+      if (def?.light) put(e.x + (e.w || 1) / 2, e.y + (e.h || 1) / 2, def.light);
     }
     for (const p of game.render.lights.all()) {
       try {
@@ -86,14 +102,15 @@ export class Lighting {
     lctx.fillStyle = `rgb(${amb(tr)},${amb(tg)},${amb(tb)})`;
     lctx.fillRect(0, 0, w, h);
     lctx.globalCompositeOperation = 'lighter';
-    const cam = game.camera;
     const t = view.time;
+    const hw = view.w / 2;
+    const hh = view.h / 2;
     for (const L of this.collect(view)) {
-      const s = cam.worldToScreen(L.x, L.y);
+      if (!Number.isFinite(L.x) || !Number.isFinite(L.y) || !(L.radius > 0)) continue;
       const fl = L.flicker ? 1 + Math.sin(t * 13 + L.x * 7.1 + L.y * 3.3) * L.flicker * 0.5 + Math.sin(t * 29 + L.x) * L.flicker * 0.3 : 1;
       const r = L.radius * view.scale * fl * sc;
-      const x = s.x * sc;
-      const y = s.y * sc;
+      const x = ((L.x - view.camX) * view.scale + hw) * sc;
+      const y = ((L.y - view.camY) * view.scale + hh) * sc;
       if (x < -r || y < -r || x > w + r || y > h + r) continue;
       lctx.globalAlpha = Math.min(1, (L.intensity ?? 1) * dark * 1.15);
       lctx.drawImage(glowSprite(L.color || '#ffffff', 48, 1.5), x - r, y - r, r * 2, r * 2);

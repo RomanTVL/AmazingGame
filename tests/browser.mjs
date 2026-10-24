@@ -1,7 +1,10 @@
 // Дымовой тест в headless Chromium (Playwright, установлен глобально).
-// Запуск: node tests/browser.mjs [--seed 42] [--keep]
-// Поднимает статический сервер, открывает игру 1600×900, жмёт WASD/E/C+мышь/колесо, снимает скриншоты
-// в tests/screens/*.png, меряет FPS. Падает при любой ошибке консоли/страницы или game.errors.
+// Запуск: node tests/browser.mjs [--seed 42]
+// Поднимает статический сервер, открывает игру 1600×900, жмёт WASD/E/C+мышь/колесо/пробел, проверяет новую игру без
+// перезагрузки, ресайз и потерю фокуса, снимает скриншоты в tests/screens/*.png, меряет FPS.
+// Падает при любой ошибке консоли/страницы или game.errors.
+// Тайминг: после каждого действия ждём не «N мс», а нужное состояние (waitForFunction) или K кадров (frames) —
+// клавиши обрабатываются в кадре (rAF), а не в момент события.
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -43,6 +46,28 @@ page.on('pageerror', (err) => problems.push(`pageerror: ${err.message}`));
 page.on('requestfailed', (r) => problems.push(`requestfailed: ${r.url()}`));
 
 const wait = (ms) => page.waitForTimeout(ms);
+const g = (fn, arg) => page.evaluate(fn, arg);
+/** Дождаться n кадров игры (requestAnimationFrame) — ввод обработан. */
+const frames = (n = 2) =>
+  page.evaluate(
+    (k) =>
+      new Promise((res) => {
+        let i = 0;
+        const f = () => (++i >= k ? res() : requestAnimationFrame(f));
+        requestAnimationFrame(f);
+      }),
+    n,
+  );
+/** Дождаться условия в странице (или зафиксировать проблему). @returns {Promise<boolean>} */
+const until = async (fn, arg, timeout, problem) => {
+  try {
+    await page.waitForFunction(fn, arg, { timeout, polling: 'raf' });
+    return true;
+  } catch {
+    if (problem) problems.push(problem);
+    return false;
+  }
+};
 const shot = async (name) => {
   const file = path.join(SHOTS, `${name}.png`);
   await page.screenshot({ path: file });
@@ -52,18 +77,38 @@ const hold = async (key, ms) => {
   await page.keyboard.down(key);
   await wait(ms);
   await page.keyboard.up(key);
+  await frames(2);
 };
-const g = (fn, arg) => page.evaluate(fn, arg);
+const fpsFor = (ms) =>
+  g(
+    (dur) =>
+      new Promise((res) => {
+        let n = 0;
+        const t0 = performance.now();
+        const f = () => {
+          n++;
+          if (performance.now() - t0 < dur) requestAnimationFrame(f);
+          else res((n * 1000) / (performance.now() - t0));
+        };
+        requestAnimationFrame(f);
+      }),
+    ms,
+  );
 
 let fps = 0;
 try {
   await page.goto(`http://127.0.0.1:${port}/index.html?seed=${SEED}`);
   await page.waitForFunction(() => window.__game && window.__game.map && window.__game.renderer, null, { timeout: 15000 });
   await page.mouse.move(800, 450);
-  await wait(1500);
+  await frames(30);
+  await wait(500);
   await shot('01-start');
 
   // ходьба
+  const start = await g(() => {
+    const l = window.__game.getLeader();
+    return { x: l.x, y: l.y };
+  });
   await hold('d', 900);
   await hold('s', 700);
   await hold('a', 500);
@@ -72,6 +117,7 @@ try {
     return { x: l.x, y: l.y };
   });
   console.log(`  лидер в (${moved.x.toFixed(1)}, ${moved.y.toFixed(1)})`);
+  if (Math.hypot(moved.x - start.x, moved.y - start.y) < 1) problems.push('WASD не двигает лидера');
   await shot('02-walk');
 
   // E по ближайшему дереву: наводим мышь и жмём E
@@ -87,133 +133,163 @@ try {
   });
   if (tree) {
     await page.mouse.move(tree.sx, tree.sy);
-    await wait(150);
+    await until((id) => window.__game.player.hint?.label && window.__game.map.plantAt(window.__game.player.hint.tx, window.__game.player.hint.ty)?.id === id, tree.id, 3000);
     await page.keyboard.press('e');
-    await wait(2500);
+    await until(() => window.__game.getLeader()?.job?.type === 'chop', null, 3000, 'E не начал рубку');
+    await wait(1500);
     await shot('03-chop');
-    await wait(3500);
-    const chopped = await g((id) => !window.__game.entities.get(id), tree.id);
+    const chopped = await until((id) => !window.__game.entities.get(id), tree.id, 20000);
     console.log(`  дерево срублено: ${chopped}`);
     if (!chopped) problems.push('лидер не срубил дерево по E');
   } else problems.push('нет дерева рядом с лидером');
 
-  // C + перетаскивание: пометить рощу
+  // C + перетаскивание: пометить рощу (область — подальше от HUD, ближе к центру экрана)
   const area = await g(() => {
     const game = window.__game;
     const l = game.getLeader();
-    const trees = game.entities.queryRadius(l.x, l.y, 12, 'plant', (e) => game.defs.plants.get(e.defId)?.choppable);
+    const trees = game.entities.queryRadius(l.x, l.y, 12, 'plant', (e) => {
+      if (!game.defs.plants.get(e.defId)?.choppable || game.designations.forTarget(e.id).length) return false;
+      const s = game.camera.worldToScreen(e.x + 0.5, e.y + 0.5);
+      return s.x > 420 && s.x < 1180 && s.y > 220 && s.y < 680;
+    });
     const t = trees[Math.floor(trees.length / 2)] || trees[0];
-    const a = game.camera.worldToScreen(t.x - 2, t.y - 2);
-    const b = game.camera.worldToScreen(t.x + 3, t.y + 3);
+    if (!t) return null;
+    const a = game.camera.worldToScreen(t.x - 1.5, t.y - 1.5);
+    const b = game.camera.worldToScreen(t.x + 2.5, t.y + 2.5);
     return { a, b };
   });
-  await page.keyboard.down('c');
-  await page.mouse.move(area.a.x, area.a.y);
-  await page.mouse.down();
-  await page.mouse.move((area.a.x + area.b.x) / 2, (area.a.y + area.b.y) / 2, { steps: 4 });
-  await page.mouse.move(area.b.x, area.b.y, { steps: 4 });
-  await shot('04-designate-drag');
-  await page.mouse.up();
-  await page.keyboard.up('c');
-  const des = await g(() => window.__game.designations.count());
-  console.log(`  пометок: ${des}`);
-  if (des < 1) problems.push('C+перетаскивание не поставило пометок');
+  if (area) {
+    const before = await g(() => window.__game.designations.count());
+    await page.keyboard.down('c');
+    await until(() => window.__game.player.toolActive, null, 2000, 'C не включил инструмент пометок');
+    await page.mouse.move(area.a.x, area.a.y);
+    await frames(2);
+    await page.mouse.down();
+    await until(() => !!window.__game.player.tool, null, 2000, 'C+ЛКМ не начал выделение');
+    await page.mouse.move((area.a.x + area.b.x) / 2, (area.a.y + area.b.y) / 2, { steps: 4 });
+    await page.mouse.move(area.b.x, area.b.y, { steps: 4 });
+    await frames(2);
+    await shot('04-designate-drag');
+    await page.mouse.up();
+    await until((n) => window.__game.designations.count() > n && !window.__game.player.tool, before, 3000);
+    await page.keyboard.up('c');
+    await frames(2);
+    const des = await g(() => window.__game.designations.count());
+    console.log(`  пометок: ${des}`);
+    if (des <= before) problems.push('C+перетаскивание не поставило пометок');
+  } else problems.push('нет деревьев в центре экрана для пометок');
 
   // ускорение времени, поселенцы работают
   await page.keyboard.press('Equal');
+  await frames(2);
   await page.keyboard.press('Equal');
+  await until(() => window.__game.speed === 3 && !window.__game.paused, null, 2000, '+ не ускоряет время');
   await wait(4000);
   await shot('05-colonists-work');
   await page.keyboard.press('Minus');
+  await frames(2);
   await page.keyboard.press('Minus');
+  await until(() => window.__game.speed === 1, null, 2000, '− не замедляет время');
 
   // зум
   await page.mouse.move(800, 450);
+  const z0 = await g(() => window.__game.camera.targetZoom);
   for (let i = 0; i < 4; i++) {
     await page.mouse.wheel(0, -120);
-    await wait(60);
+    await frames(2);
   }
+  if ((await g(() => window.__game.camera.targetZoom)) <= z0) problems.push('колесо не приближает');
   await wait(700);
   await shot('06-zoom-in');
   for (let i = 0; i < 8; i++) {
     await page.mouse.wheel(0, 120);
-    await wait(60);
+    await frames(2);
   }
   await wait(700);
   await shot('07-zoom-out');
   for (let i = 0; i < 4; i++) {
     await page.mouse.wheel(0, -120);
-    await wait(60);
+    await frames(2);
   }
 
   // FPS (днём) — 3 секунды
-  fps = await g(
-    () =>
-      new Promise((res) => {
-        let n = 0;
-        const t0 = performance.now();
-        const f = () => {
-          n++;
-          if (performance.now() - t0 < 3000) requestAnimationFrame(f);
-          else res((n * 1000) / (performance.now() - t0));
-        };
-        requestAnimationFrame(f);
-      }),
-  );
+  fps = await fpsFor(3000);
   console.log(`  FPS днём: ${fps.toFixed(1)}`);
 
   // ночь
   await g(() => window.__game.time.setHour(23));
   await page.mouse.move(820, 430);
-  await wait(1200);
+  await frames(10);
+  await wait(800);
   await shot('08-night');
-  const fpsNight = await g(
-    () =>
-      new Promise((res) => {
-        let n = 0;
-        const t0 = performance.now();
-        const f = () => {
-          n++;
-          if (performance.now() - t0 < 2000) requestAnimationFrame(f);
-          else res((n * 1000) / (performance.now() - t0));
-        };
-        requestAnimationFrame(f);
-      }),
-  );
+  const fpsNight = await fpsFor(2000);
   console.log(`  FPS ночью: ${fpsNight.toFixed(1)}`);
   fps = Math.min(fps, fpsNight);
 
   // сумерки + отладка + подсказка при наведении на поселенца
   await g(() => window.__game.time.setHour(19.5));
   await page.keyboard.press('F9');
+  await until(() => window.__game.settings.get('showDebug') === true, null, 2000, 'F9 не включает отладку');
   const col = await g(() => {
     const game = window.__game;
     const p = game.colonists().find((c) => !c.isLeader);
-    const s = game.camera.worldToScreen(p.x, p.y);
-    return s;
+    return p ? game.camera.worldToScreen(p.x, p.y) : null;
   });
-  await page.mouse.move(col.x, col.y);
-  await wait(800);
+  if (col) await page.mouse.move(col.x, col.y);
+  await frames(10);
+  await wait(500);
   await shot('09-dusk-debug-tooltip');
   await page.keyboard.press('F9');
+  await until(() => window.__game.settings.get('showDebug') === false, null, 2000, 'F9 не выключает отладку');
 
   // пауза
   await page.keyboard.press('Space');
-  const paused = await g(() => window.__game.paused);
-  if (!paused) problems.push('Пробел не ставит паузу');
+  await until(() => window.__game.paused === true, null, 2000, 'Пробел не ставит паузу');
+  const tickPaused = await g(() => window.__game.time.tick);
+  await frames(10);
+  if ((await g(() => window.__game.time.tick)) !== tickPaused) problems.push('на паузе тикает симуляция');
   await page.keyboard.press('Space');
+  await until(() => window.__game.paused === false, null, 2000, 'Повторный пробел не снимает паузу');
+
+  // потеря фокуса посреди ходьбы: клавиши отпускаются
+  await page.keyboard.down('d');
+  await until(() => window.__game.getLeader()?.moveInput.x > 0, null, 2000, 'D не задаёт движение');
+  await g(() => window.dispatchEvent(new Event('blur')));
+  await frames(3);
+  if (await g(() => window.__game.getLeader()?.moveInput.x !== 0)) problems.push('после потери фокуса лидер продолжает идти');
+  await page.keyboard.up('d');
+
+  // ресайз окна
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await until(() => window.__game.renderer.w === 1280 && window.__game.camera.w === 1280, null, 3000, 'ресайз не применился');
+  await frames(5);
+  await page.setViewportSize({ width: 1600, height: 900 });
+  await until(() => window.__game.renderer.w === 1600, null, 3000, 'обратный ресайз не применился');
 
   // сохранение/загрузка в браузере
   const saveOk = await g(() => {
     const game = window.__game;
     const n = game.entities.count;
-    game.save.saveSlot('test');
+    const bytes = game.save.saveSlot('test');
     const ok = game.save.loadSlot('test');
     game.save.deleteSlot('test');
-    return ok && game.entities.count === n;
+    return bytes > 0 && ok && game.entities.count === n;
   });
   if (!saveOk) problems.push('сохранение/загрузка в браузере не совпали');
+  await frames(10);
+
+  // новая игра без перезагрузки страницы (главное меню ui вызывает game.newGame)
+  const ng = await g(() => {
+    const game = window.__game;
+    const oldMap = game.map;
+    game.newGame({ seed: 777, colonyName: 'Проверка', leaderName: 'Тест Тестов', difficulty: 'hard' });
+    return { changed: game.map !== oldMap, name: game.getLeader()?.name, colony: game.colony.name, diff: game.colony.difficulty };
+  });
+  if (!ng.changed || ng.name !== 'Тест Тестов' || ng.colony !== 'Проверка' || ng.diff !== 'hard') problems.push(`newGame без перезагрузки: ${JSON.stringify(ng)}`);
+  await frames(20);
   await wait(500);
+  await shot('10-new-game');
+  await hold('w', 400);
 
   const gameErrors = await g(() => window.__game.errors.map((e) => `${e.where}: ${e.message}`));
   problems.push(...gameErrors.map((e) => `game.error ${e}`));
@@ -222,6 +298,7 @@ try {
     return { ents: game.entities.count, jobs: game.stats.jobsDone, colonists: game.colonists().length, keyConflicts: game.input.conflicts.length };
   });
   console.log(`  сущностей ${stats.ents}, работ ${stats.jobs}, поселенцев ${stats.colonists}, конфликтов клавиш ${stats.keyConflicts}`);
+  if (stats.keyConflicts) problems.push('конфликты клавиш');
 } catch (err) {
   problems.push(`исключение теста: ${err.message}`);
   await shot('99-failure').catch(() => {});

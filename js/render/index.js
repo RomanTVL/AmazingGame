@@ -1,8 +1,8 @@
 // Регистрация слоёв отрисовки ядра (безопасно в headless — функции вызываются только в браузере).
-import { TileRenderer } from './tiles.js';
+import { TileRenderer, isBakedBuilding } from './tiles.js';
 import { Lighting } from './lighting.js';
 import { FogRenderer } from './fog.js';
-import { makeKindLayer, emissiveLayer, registerEntityDrawers } from './entities.js';
+import { makeKindLayer, emissiveLayer, registerEntityDrawers, pawnsLayer } from './entities.js';
 import { pawnDrawer } from './pawns.js';
 import { waterFxLayer, zonesLayer, designationsLayer, overlayLayer, trainDecoLayer } from './overlays.js';
 import { registerCoreHud, cursorLayer } from './hud.js';
@@ -24,10 +24,14 @@ export function registerCoreRender(game) {
   r.registerLayer(zonesLayer());
   r.registerLayer(makeKindLayer('decals', 30, 'decal'));
   r.registerLayer(makeKindLayer('items', 40, 'item'));
-  r.registerLayer(makeKindLayer('plants', 45, 'plant', true, (e, g) => g.defs.plants.get(e.defId)?.bake === false));
-  r.registerLayer(makeKindLayer('buildings', 50, 'building', true, (e, g) => !g.defs.buildings.get(e.defId)?.bake));
+  // в кэш тайлов не запекаются растения с bake === false или своим draw — их рисует этот слой каждый кадр
+  r.registerLayer(makeKindLayer('plants', 45, 'plant', true, (e, g) => {
+    const d = g.defs.plants.get(e.defId);
+    return !!d && (d.bake === false || !!d.draw);
+  }));
+  r.registerLayer(makeKindLayer('buildings', 50, 'building', true, (e, g) => !isBakedBuilding(g, g.defs.buildings.get(e.defId))));
   r.registerLayer(makeKindLayer('corpses', 55, 'corpse'));
-  r.registerLayer(makeKindLayer('pawns', 60, 'pawn', true));
+  r.registerLayer(pawnsLayer('pawns', 60));
   r.registerLayer(trainDecoLayer());
   r.registerLayer(makeKindLayer('projectiles', 70, 'projectile'));
   r.registerLayer({ id: 'particles', order: 80, draw: (ctx, g, v) => g.fx.draw(ctx, v, false) });

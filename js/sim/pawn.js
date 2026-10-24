@@ -3,7 +3,7 @@
 // Ядро гарантирует, что эти поля существуют (пустые) у каждой пешки.
 import { EVENTS } from '../core/events.js';
 import { FACTION } from '../core/constants.js';
-import { clamp } from '../core/math.js';
+import { safeNum } from '../core/math.js';
 
 export const NAMES = {
   ru: {
@@ -76,12 +76,25 @@ export function pawnDefaults(game) {
     equipment: {},
     workPriorities: game.jobs.defaultPriorities(),
     light: null,
+    // --- соглашения о полях модулей (JSON, сохраняются; см. docs/ARCHITECTURE.md «Пешка») ---
+    pose: 'idle', // 'idle'|'sit'|'sleep'|'talk'|'shovel'|'carry'|'carried'|'hug'|'toast'|'pet'|'window'|'dying'|'limp'|'hop' — ставят sim-модули, рисует av
+    poseUntil: 0, // тик, до которого держится pose (0 — без срока)
+    faceId: 0, // id сущности, к которой пешка повёрнута лицом (0 — нет)
+    soot: 0, // 0..1 копоть (journey/train)
+    perks: {}, // перки боя (combat)
+    look: {}, // внешность (ui/сценарий; у лидера — {curls, curlLen, crystal, scar})
   };
 }
 
-/** Создать пешку. opts переопределяют поля по умолчанию. */
+/**
+ * Создать пешку. opts переопределяют поля по умолчанию (готовые bio/traits/skills из opts.roster
+ * обработчики 'pawn:spawned' НЕ перезаписывают — только дополняют недостающее).
+ * markProgress (белая кудрявая метка) по умолчанию: лидер — 1, остальные — 0.
+ */
 export function createPawn(game, opts = {}) {
-  const pawn = game.entities.spawn('pawn', { ...pawnDefaults(game), ...opts });
+  const props = { ...pawnDefaults(game), ...opts };
+  if (!Number.isFinite(props.markProgress)) props.markProgress = props.isLeader ? 1 : 0;
+  const pawn = game.entities.spawn('pawn', props);
   game.events.emit(EVENTS.PAWN_SPAWNED, { pawn });
   return pawn;
 }
@@ -117,6 +130,26 @@ export function pathDone(pawn) {
   return !pawn.path || pawn.pathI >= pawn.path.length;
 }
 
+/**
+ * Страховка от NaN/∞ в позиции (ошибка модуля): возвращает пешку в последнюю корректную точку
+ * (или к поезду) и пишет game.error. @returns {boolean} была ли позиция испорчена
+ */
+export function sanitizePosition(game, p) {
+  if (Number.isFinite(p.x) && Number.isFinite(p.y)) {
+    p._safeX = p.x;
+    p._safeY = p.y;
+    return false;
+  }
+  const home = game.train?.center();
+  const map = game.map;
+  p.x = Number.isFinite(p._safeX) ? p._safeX : home?.x ?? (map ? map.w / 2 : 0);
+  p.y = Number.isFinite(p._safeY) ? p._safeY : home?.y ?? (map ? map.h / 2 : 0);
+  stopMoving(p);
+  game.error(new Error(`[pawn] #${p.id} ${p.name}: нечисловая позиция — возвращена в (${p.x.toFixed(1)}, ${p.y.toFixed(1)})`), 'pawn.position');
+  game.entities.moved(p);
+  return true;
+}
+
 /** Система движения по пути (порядок 50). Пешки под прямым управлением двигает player-система. */
 export function registerPawnSystems(game) {
   game.systems.add({
@@ -126,6 +159,7 @@ export function registerPawnSystems(game) {
       const map = game.map;
       if (!map) return;
       for (const p of game.entities.ofKind('pawn')) {
+        sanitizePosition(game, p);
         if (p.dead || p.downed) {
           p.moving = false;
           continue;
@@ -150,7 +184,7 @@ export function registerPawnSystems(game) {
         const dy = ty - p.y;
         const d = Math.hypot(dx, dy);
         const tileCost = map.cost[map.idx(Math.floor(p.x), Math.floor(p.y))] || 1;
-        const speed = p.speed * clamp(game.api.health.moveSpeedFactor(p), 0.05, 3) / Math.max(0.5, tileCost);
+        const speed = (safeNum(p.speed, 0, 40, 4) * safeNum(game.api.health.moveSpeedFactor(p), 0.05, 3)) / Math.max(0.5, tileCost);
         const step = speed * dt;
         if (d <= step) {
           p.x = tx;

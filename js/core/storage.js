@@ -7,8 +7,10 @@ class MemoryStorage {
   getItem(k) {
     return this.m.has(k) ? this.m.get(k) : null;
   }
+  /** @returns {boolean} записано ли */
   setItem(k, v) {
     this.m.set(k, String(v));
+    return true;
   }
   removeItem(k) {
     this.m.delete(k);
@@ -25,34 +27,41 @@ class SafeStorage {
     this.fallback = new MemoryStorage();
   }
   getItem(k) {
+    const mem = this.fallback.getItem(k);
+    if (mem !== null) return mem; // запасная копия свежее (запись в localStorage не удалась)
     try {
       return this.b.getItem(k);
     } catch {
-      return this.fallback.getItem(k);
+      return null;
     }
   }
+  /** @returns {boolean} false — localStorage отказал (квота/приватный режим), значение только в памяти вкладки */
   setItem(k, v) {
     try {
       this.b.setItem(k, v);
+      this.fallback.removeItem(k);
+      return true;
     } catch {
       this.fallback.setItem(k, v);
+      return false;
     }
   }
   removeItem(k) {
+    this.fallback.removeItem(k);
     try {
       this.b.removeItem(k);
     } catch {
-      this.fallback.removeItem(k);
+      /* ignore */
     }
   }
   keys() {
+    const out = new Set(this.fallback.keys());
     try {
-      const out = [];
-      for (let i = 0; i < this.b.length; i++) out.push(this.b.key(i));
-      return out;
+      for (let i = 0; i < this.b.length; i++) out.add(this.b.key(i));
     } catch {
-      return this.fallback.keys();
+      /* ignore */
     }
+    return [...out];
   }
 }
 

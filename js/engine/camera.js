@@ -27,11 +27,12 @@ export class Camera {
   }
 
   setViewport(w, h) {
-    this.w = w;
-    this.h = h;
+    this.w = Math.max(1, w || 1);
+    this.h = Math.max(1, h || 1);
   }
 
   snapTo(x, y) {
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
     this.x = x;
     this.y = y;
   }
@@ -42,13 +43,15 @@ export class Camera {
   }
 
   zoomBy(steps) {
+    if (!Number.isFinite(steps)) return;
     this.targetZoom = clamp(this.targetZoom * Math.pow(1.15, -steps), this.minZoom, this.maxZoom);
   }
 
   update(dt) {
     const game = this.game;
     const target = (this.followId && game.entities.get(this.followId)) || game.getLeader();
-    if (target) {
+    if (!Number.isFinite(dt) || dt < 0) dt = 0;
+    if (target && Number.isFinite(target.x) && Number.isFinite(target.y)) {
       let tx = target.x;
       let ty = target.y;
       const m = game.input?.mouse;
@@ -68,6 +71,10 @@ export class Camera {
       this.shake = Math.max(0, this.shake - dt * 2.2);
     } else {
       this.shakeX = this.shakeY = 0;
+    }
+    if (!Number.isFinite(this.x) || !Number.isFinite(this.y)) {
+      this.x = game.map ? game.map.w / 2 : 0;
+      this.y = game.map ? game.map.h / 2 : 0;
     }
     const map = game.map;
     if (map) {

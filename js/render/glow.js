@@ -6,9 +6,30 @@
 import { sprite } from '../engine/assets.js';
 import { hexToRgb, rgba } from './color.js';
 
-/** Радиальный спрайт свечения (диаметр 2r, r квантуется до 8 px). */
+// Быстрый путь без сборки строки-ключа на каждый вызов: color → (r*16+falloff) → canvas.
+const fast = new Map();
+let fastCount = 0;
+
+/** Радиальный спрайт свечения (диаметр 2r, r квантуется до 8 px, максимум 256). */
 export function glowSprite(color, radius = 32, falloff = 2) {
-  const r = Math.max(8, Math.ceil(radius / 8) * 8);
+  const r = Math.min(256, Math.max(8, Math.ceil((Number.isFinite(radius) ? radius : 8) / 8) * 8));
+  let byColor = fast.get(color);
+  const k = r * 16 + falloff;
+  const hit = byColor?.get(k);
+  if (hit) return hit;
+  if (fastCount > 2000) {
+    fast.clear();
+    fastCount = 0;
+    byColor = undefined;
+  }
+  if (!byColor) fast.set(color, (byColor = new Map()));
+  const c = makeGlow(color, r, falloff);
+  byColor.set(k, c);
+  fastCount++;
+  return c;
+}
+
+function makeGlow(color, r, falloff) {
   return sprite(`glow:${color}:${r}:${falloff}`, r * 2, r * 2, (ctx) => {
     const [cr, cg, cb] = hexToRgb(color);
     const g = ctx.createRadialGradient(r, r, 0, r, r, r);
@@ -25,7 +46,7 @@ export function glowSprite(color, radius = 32, falloff = 2) {
 
 /** Аддитивное свечение в точке (координаты контекста). */
 export function drawGlow(ctx, x, y, r, color, alpha = 1) {
-  if (alpha <= 0.01 || r <= 0) return;
+  if (!(alpha > 0.01) || !(r > 0)) return;
   const s = glowSprite(color, r);
   const prevOp = ctx.globalCompositeOperation;
   const prevA = ctx.globalAlpha;

@@ -50,42 +50,50 @@ export class SaveManager {
     };
   }
 
-  /** Восстановить из снимка (полностью заменяет текущий мир). */
-  restore(snap) {
-    if (!snap || snap.format !== SAVE_FORMAT) throw new Error('[save] неизвестный формат сейва');
+  /**
+   * Восстановить из снимка (полностью заменяет текущий мир): resetWorld('load') → load() сериализаторов
+   * по order → событие 'load:after' {slot}. Данные отсутствующих в сейве сериализаторов не грузятся
+   * (модуль должен сбросить своё состояние на 'world:reset').
+   */
+  restore(snap, slot = null) {
+    if (!snap || snap.format !== SAVE_FORMAT || !snap.data) throw new Error('[save] неизвестный формат сейва');
+    if ((snap.version | 0) > SAVE_VERSION) throw new Error(`[save] сейв версии ${snap.version} новее игры (${SAVE_VERSION})`);
     const game = this.game;
-    game.resetWorld();
+    game.resetWorld('load');
     for (const s of this.serializers.all()) {
       if (snap.data[s.id] === undefined) continue;
       try {
-        s.load(game, snap.data[s.id]);
+        s.load(game, snap.data[s.id], snap);
       } catch (err) {
         game.error(err, `load:${s.id}`);
       }
     }
+    game.events.emit(EVENTS.LOAD_AFTER, { slot });
   }
 
   toJSON() {
     return JSON.stringify(this.snapshot());
   }
 
-  fromJSON(json) {
-    this.restore(JSON.parse(json));
+  fromJSON(json, slot = null) {
+    this.restore(JSON.parse(json), slot);
   }
 
+  /** @returns {number} размер сейва (символов) или 0, если хранилище отказало (сейв остался только в памяти вкладки) */
   saveSlot(slot = 'quick') {
     this.game.events.emit(EVENTS.SAVE_BEFORE, { slot });
     const json = this.toJSON();
-    this.game.storage.setItem(PREFIX + slot, json);
-    this.game.events.emit(EVENTS.SAVE_AFTER, { slot, bytes: json.length });
-    return json.length;
+    const ok = this.game.storage.setItem(PREFIX + slot, json) !== false;
+    this.game.events.emit(EVENTS.SAVE_AFTER, { slot, bytes: json.length, ok });
+    if (!ok) this.game.api.ui.notify(this.game.t('save.failed'), { type: 'bad' });
+    return ok ? json.length : 0;
   }
 
+  /** @returns {boolean} загружено ли (false — слота нет) */
   loadSlot(slot = 'quick') {
     const json = this.game.storage.getItem(PREFIX + slot);
     if (!json) return false;
-    this.fromJSON(json);
-    this.game.events.emit(EVENTS.LOAD_AFTER, { slot });
+    this.fromJSON(json, slot);
     return true;
   }
 

@@ -184,7 +184,11 @@ export function overlayLayer() {
           if (game.vision.enabled && !game.vision.isVisible(Math.floor(p.x), Math.floor(p.y))) continue;
           const isHover = hover?.entities?.includes(p);
           if (!isHover && view.zoom < 1.3 && p !== leader) continue;
-          const name = p.name.split(' ')[0];
+          if (p._nameSrc !== p.name) {
+            p._nameSrc = p.name;
+            p._firstName = String(p.name ?? '').split(' ')[0];
+          }
+          const name = p._firstName;
           ctx.fillStyle = 'rgba(0,0,0,0.6)';
           ctx.fillText(name, p.x * TILE + 0.5, p.y * TILE + 12.5);
           ctx.fillStyle = rgba(p.color || '#fff', isHover ? 1 : 0.8);

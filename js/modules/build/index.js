@@ -17,20 +17,27 @@
  *     взаимодействие game.defs.interactions.add({id: 'build:construct', order: 15, find(game, pawn, tx, ty)}).
  *  3. Переопределить API: game.provide('build', { canPlace(defId, x, y, rot), place(defId, x, y, {rot}) → чертёж,
  *     deconstruct(entity) }, 'build').
- *  4. UI: меню стройки по клавише B (категории, превью-призрак под курсором зелёный/красный, R — поворот,
- *     ЛКМ — поставить, ПКМ/Esc — отмена) — game.ui.registerPanel({id: 'build', key: 'KeyB', ...}) и слой превью
- *     game.render.registerLayer({id: 'build:ghost', order: 98, ...}). Поворот — клавиша G (выделена build) или
- *     Shift+колесо, пока активен режим стройки.
- *  5. Инструменты пометок (замена временного C ядра): C — рубить/собрать/добыть (ядро уже даёт C+мышь,
- *     можно переиспользовать game.player.applyTool), X — снять пометки/разобрать, Z — зоны складов
- *     (game.zones.create('stockpile', cells, {filter})), фильтры склада по категориям.
- *  6. Комнаты: пересчитывать map.room для построек на земле (заливка, ограниченная стенами/дверями),
- *     крыши (map.roof = 2 для построенной крыши) — для температуры/красоты (mind) и тумана (vision).
- *  7. Сохранение: всё в полях сущностей сохраняется автоматически; своё состояние — game.save.registerSerializer.
- *  8. Строки: game.i18n.add('ru', {build: {...}}) и 'en'.
+ *  4. UI: меню стройки по клавише B (категории, превью-призрак под курсором зелёный/красный, G — поворот,
+ *     ЛКМ — поставить, ПКМ/Esc — отмена) — game.ui.registerPanel({id: 'build', key: 'KeyB', ...}) (действие
+ *     'panel:build') и слой превью game.render.registerLayer({id: 'build:ghost', order: 98, ...}).
+ *     Поворот — действие 'build:rotate' (KeyG). НЕ R (R — «К оружию!» у combat) и НЕ Shift+колесо (Shift — рывок).
+ *     ЛКМ занята атакой лидера ('player:attack'): в режиме стройки вызывайте game.input.consume('player:attack')
+ *     в кадровой системе с order < 30 (или в panel.handleInput), иначе каждый клик будет ещё и ударом посоха.
+ *  5. Инструменты пометок (замена временного C ядра): C — рубить/собрать/добыть (действие ядра 'player:designate';
+ *     отключите инструмент ядра: game.player.coreDesignateTool = false — и опрашивайте
+ *     game.input.isDown('player:designate') сами; можно переиспользовать game.player.applyTool),
+ *     X — снять пометки/разобрать ('build:clear'), Z — зоны складов ('build:zones';
+ *     game.zones.create('stockpile', cells, {filter})), фильтры склада по категориям.
+ *  6. Комнаты: пересчитывать map.room для построек на земле (заливка, ограниченная стенами/дверями) — id комнат
+ *     на земле < TRAIN_ROOM_BASE (10000; вагоны — 10000 + car.id, js/sim/train.js); крыши (map.roof = 2 для
+ *     построенной крыши) — для температуры/красоты (mind) и тумана (vision).
+ *  7. Мебель в вагонах: ставится как обычные постройки (НЕ train: true); при train.restamp()/game.changeStation()
+ *     ядро само переносит её вместе с вагоном (game.entities.setPosition → событие 'entity:moved').
+ *  8. Сохранение: всё в полях сущностей сохраняется автоматически; своё состояние — game.save.registerSerializer.
+ *  9. Строки: game.i18n.add('ru', {build: {...}}) и 'en'.
  *
- * КЛАВИШИ (выделены): B — меню стройки, G — поворот, Z — зоны, X — снять/разобрать, C — пометки (у ядра временно:
- *          действие 'player:designate' — снимите его, если заменяете: game.input.bindings.delete('player:designate')).
+ * КЛАВИШИ (выделены, таблица — js/core/keymap.js): B — меню стройки ('panel:build'), G — поворот ('build:rotate'),
+ *          Z — зоны ('build:zones'), X — снять/разобрать ('build:clear'), C — пометки (действие ядра 'player:designate').
  * СОБЫТИЯ, которые стоит слать: 'build:placed' {entity}, 'build:completed' {entity, pawn}, 'build:deconstructed' {entity}.
  */
 export function register(game) {

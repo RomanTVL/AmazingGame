@@ -1,10 +1,11 @@
 // Headless-симуляция в Node: колония живёт N игровых дней на максимальной скорости, бот водит лидера.
-// Запуск: node tests/headless.mjs --days 10 --seed 42
-// Падает (exit 1), если были исключения (game.errors) или нарушены инварианты.
+// Запуск: node tests/headless.mjs --days 10 --seed 42 [--quiet] [--no-contract]
+// Падает (exit 1), если были исключения (game.errors), нарушены инварианты или контракт ядра (tests/contract.mjs).
 import { createGame, startNewColony } from '../js/core/boot.js';
 import { TICKS_PER_DAY } from '../js/core/constants.js';
 import { RNG } from '../js/core/rng.js';
 import { makeEatJob, makeSleepJob } from '../js/sim/needs.js';
+import { runContractTests } from './contract.mjs';
 
 const args = Object.fromEntries(
   process.argv.slice(2).reduce((acc, a, i, arr) => {
@@ -134,6 +135,12 @@ async function fingerprint(seed, ticks) {
 const fa = await fingerprint(777, 3000);
 const fb = await fingerprint(777, 3000);
 if (fa !== fb) fail('недетерминированная симуляция: одинаковый сид дал разные состояния');
+
+// ---------- Контракт ядра для модулей ----------
+if (!args['no-contract']) {
+  const contract = await runContractTests({ log: QUIET ? () => {} : console.log });
+  for (const m of contract) fail(`контракт: ${m}`);
+}
 
 // ---------- Итоги ----------
 const errors = [...game.errors, ...game2.errors];

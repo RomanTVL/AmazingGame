@@ -21,16 +21,25 @@
  *  6. Срывы при низком настроении: истерика, запой, бегство, драка, поджог — через think-узел с высоким приоритетом;
  *     isInBreak(pawn). Сообщения через game.api.ui.notify.
  *  7. Расписание: pawn.schedule[24] = 'sleep'|'work'|'joy'|'any'; game.provide('mind', { scheduleAllows(pawn, activity) }).
- *  8. Биографии и имена: при 'pawn:spawned' заполнить pawn.bio = {childhood, adulthood, lines[]}, черты, навыки.
- *     Лидер (pawn.mage === true) — маг: навык magic ≥ 6.
+ *  8. Биографии и имена: при 'pawn:spawned' заполнить pawn.bio = {childhood, adulthood, lines[]}, черты, навыки —
+ *     ТОЛЬКО недостающее: пешки из экрана новой игры (opts.roster) приходят с готовыми bio/traits/skills, их не
+ *     перезаписывать. Лидер (pawn.mage === true) — маг: навык magic ≥ 6. Кандидаты для реролла на экране новой игры —
+ *     game.provide('mind', { generateCandidate(rng, opts) → {name, gender, age, bio, traits, skills, look, role} }).
+ *     Сны — pawn.dream, вдохновение — pawn.inspiration (JSON-поля пешки).
  *  9. Реплики: game.api.mind.say(pawn, text) → событие 'pawn:said' (облачко рисует ui/av). Тексты — через
  *     game.i18n.tRude('mind.say.x.clean', 'mind.say.x.rude') — мат изредка (~1 из 10), не в момент смерти.
  * 10. UI: карточка персонажа (клавиша I) и панель расписания/отношений (F7) — game.ui.registerPanel(...).
  *     Подсказка над пешкой: game.ui.registerTooltip({id: 'mind', lines(game, hover) {...}}).
  * 11. Сохранение: компоненты на пешке сохраняются автоматически (только JSON-данные!).
+ * 12. Авторитет лидера: game.colony.authority 0..100 — game.provide('mind', { getAuthority(), addAuthority(delta, reason),
+ *     willObey(pawn, orderId, opts) → {ok, reply}, addTrait(pawn, id, opts), revealTrait(pawn, id),
+ *     setRelation(a, b, kind, opinion) }). Заглушки ядра: addAuthority клампит и шлёт 'mind:authorityChanged';
+ *     willObey всегда {ok: true}. Отказ исполнять приказ показывает vision ('orders:refused').
+ *     Социальные сцены — 'mind:social' {a, b, kind, glyphs, audible, ticks} (позы pawn.pose 'talk'/'hug'/'toast').
  *
- * КЛАВИШИ (выделены): I — карточка персонажа, F7 — расписание/отношения.
- * СОБЫТИЯ: 'mind:thought' {pawn, id}, 'mind:breakStarted' {pawn, kind}, 'mind:breakEnded' {pawn}, 'mind:skillUp' {pawn, skill, level}.
+ * КЛАВИШИ (выделены): I — карточка персонажа ('panel:character'), F7 — расписание/отношения ('panel:schedule').
+ * СОБЫТИЯ: 'mind:thought' {pawn, id}, 'mind:breakStarted' {pawn, kind}, 'mind:breakEnded' {pawn}, 'mind:skillUp' {pawn, skill, level},
+ *          'mind:social' {a, b, kind, glyphs, audible, ticks}, 'mind:authorityChanged' {value, delta, reason}.
  */
 export function register(game) {
   void game;

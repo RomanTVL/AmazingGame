@@ -80,7 +80,10 @@ export class ItemManager {
    */
   spawn(defId, count, x, y, opts = {}) {
     const def = this.def(defId);
-    if (!def || count <= 0 || !this.game.map) return [];
+    if (!def || !(count > 0) || !Number.isFinite(count) || !this.game.map) return [];
+    x = Math.floor(x);
+    y = Math.floor(y);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return [];
     const map = this.game.map;
     const touched = [];
     let left = Math.floor(count);
@@ -107,7 +110,7 @@ export class ItemManager {
 
   /** Уменьшить стопку на n (удаляет при 0). @returns {number} сколько взято */
   take(item, n) {
-    if (!item || item.removed) return 0;
+    if (!item || item.removed || !Number.isFinite(n)) return 0;
     const k = Math.min(item.count, Math.max(0, Math.floor(n)));
     item.count -= k;
     if (item.count <= 0) this.game.entities.remove(item, 'taken');
@@ -117,6 +120,7 @@ export class ItemManager {
 
   /** Пешка берёт предмет в руки (pawn.carry). Чужой груз сначала сбрасывается. */
   pickUp(pawn, item, count) {
+    if (!Number.isFinite(count)) count = item.count;
     if (pawn.carry && pawn.carry.defId !== item.defId) this.dropCarried(pawn);
     const lim = this.def(item.defId)?.stackLimit ?? 75;
     const have = pawn.carry?.count ?? 0;

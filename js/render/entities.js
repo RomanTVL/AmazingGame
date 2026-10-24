@@ -11,14 +11,28 @@ import { roundRect } from '../engine/ui.js';
 
 const DYNAMIC = new Set(['pawn', 'projectile']);
 
-/** Видимые сущности вида (с учётом тумана), отсортированы по y для «глубины». */
-export function visibleOfKind(game, view, kind, sortY = false) {
-  const list = game.entities.queryRect(view.x0 - 1, view.y0 - 1, view.x1 + 1, view.y1 + 1, kind);
-  const vis = game.vision.enabled ? game.vision : null;
-  const out = vis
-    ? list.filter((e) => (DYNAMIC.has(e.kind) ? vis.isVisible(Math.floor(e.x), Math.floor(e.y)) : vis.isExplored(e.x, e.y)))
-    : list;
-  if (sortY) out.sort((a, b) => a.y - b.y);
+const byY = (a, b) => a.y - b.y;
+
+/** Видна ли сущность с учётом тумана: динамичные — если клетка видна, статичные — если исследована. */
+export function isEntityVisible(game, e) {
+  const vis = game.vision;
+  if (!vis.enabled) return true;
+  return DYNAMIC.has(e.kind) ? vis.isVisible(Math.floor(e.x), Math.floor(e.y)) : vis.isExplored(e.x, e.y);
+}
+
+/**
+ * Видимые сущности вида (с учётом тумана), по желанию отсортированы по y для «глубины».
+ * out — переиспользуемый массив (очищается); без него создаётся новый.
+ */
+export function visibleOfKind(game, view, kind, sortY = false, out = []) {
+  out.length = 0;
+  game.entities.queryRect(view.x0 - 1, view.y0 - 1, view.x1 + 1, view.y1 + 1, kind, out);
+  if (game.vision.enabled) {
+    let n = 0;
+    for (let i = 0; i < out.length; i++) if (isEntityVisible(game, out[i])) out[n++] = out[i];
+    out.length = n;
+  }
+  if (sortY) out.sort(byY);
   return out;
 }
 
@@ -29,13 +43,40 @@ export function drawEntity(ctx, game, view, e) {
 }
 
 export function makeKindLayer(id, order, kind, sortY = false, filter = null) {
+  const buf = [];
   return {
     id,
     order,
     draw(ctx, game, view) {
-      for (const e of visibleOfKind(game, view, kind, sortY)) {
+      for (const e of visibleOfKind(game, view, kind, sortY, buf)) {
         if (filter && !filter(e, game)) continue;
         drawEntity(ctx, game, view, e);
+      }
+    },
+  };
+}
+
+/** Слой пешек: тело (drawer) + оверлеи game.render.pawnOverlays для каждой видимой пешки, по y. */
+export function pawnsLayer(id = 'pawns', order = 60) {
+  const buf = [];
+  return {
+    id,
+    order,
+    draw(ctx, game, view) {
+      const overlays = game.render.pawnOverlays.all();
+      for (const p of visibleOfKind(game, view, 'pawn', true, buf)) {
+        drawEntity(ctx, game, view, p);
+        for (let i = 0; i < overlays.length; i++) {
+          const o = overlays[i];
+          if (o.enabled === false) continue;
+          ctx.save();
+          try {
+            o.draw(ctx, p, view, game);
+          } catch (err) {
+            game.error(err, `pawnOverlay:${o.id}`);
+          }
+          ctx.restore();
+        }
       }
     },
   };
@@ -464,19 +505,20 @@ const decalDrawer = {
 
 /** Слой «неона поверх темноты»: drawEmissive всех видимых сущностей. */
 export function emissiveLayer() {
+  const buf = [];
   return {
     id: 'emissive',
     order: 92,
     draw(ctx, game, view) {
       const alpha = view.night;
       if (alpha < 0.05) return;
-      const list = game.entities.queryRect(view.x0 - 2, view.y0 - 2, view.x1 + 2, view.y1 + 2);
-      const vis = game.vision.enabled ? game.vision : null;
+      buf.length = 0;
+      const list = game.entities.queryRect(view.x0 - 2, view.y0 - 2, view.x1 + 2, view.y1 + 2, undefined, buf);
       for (const e of list) {
-        if (vis && !(DYNAMIC.has(e.kind) ? vis.isVisible(Math.floor(e.x), Math.floor(e.y)) : vis.isExplored(e.x, e.y))) continue;
+        if (!isEntityVisible(game, e)) continue;
         const def = game.entities.defOf(e);
         let d = game.render.drawerFor(e, def);
-        if (e.kind === 'building' && def?.bake && def.light) d = bakedEmissive;
+        if (e.kind === 'building' && def?.bake && def.light && !def.drawEmissive) d = bakedEmissive;
         if (d?.drawEmissive) d.drawEmissive(ctx, e, game, view, alpha, def);
       }
     },
