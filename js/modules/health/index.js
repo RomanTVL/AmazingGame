@@ -272,6 +272,7 @@ export function register(game) {
           continue;
         }
         if ((now + p.id) % 30 !== 0) continue;
+        if (p.downed && p.job) g.jobs.endJob(p, 'cancelled');
         updatePawn(H, p, 30);
         if (p.dead) continue;
         if (p.downed && p.needs && 'rest' in p.needs) p.needs.rest = Math.min(1, (p.needs.rest ?? 1) + 30 / (TICKS_PER_HOUR * 8));

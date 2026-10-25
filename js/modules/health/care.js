@@ -53,13 +53,14 @@ function findMedicine(game, pawn) {
 }
 
 // ------------------------------------------------------------------ шаг «подойти к пешке»
+const nearPawn = (a, t) => Math.hypot(t.x - a.x, t.y - a.y) <= 1.5 || (Math.abs(Math.floor(t.x) - Math.floor(a.x)) <= 1 && Math.abs(Math.floor(t.y) - Math.floor(a.y)) <= 1);
 function registerToils(game, H) {
   game.jobs.registerToil({
     id: 'health:gotoPawn',
     start(g, pawn, toil, job) {
       const t = g.entities.get(toil.targetId ?? job.targetId);
       if (!t || t.dead || t.removed) return 'failed';
-      if (t === pawn || Math.hypot(t.x - pawn.x, t.y - pawn.y) <= 1.5) return 'done';
+      if (t === pawn || nearPawn(pawn, t)) return 'done';
       toil._tx = Math.floor(t.x);
       toil._ty = Math.floor(t.y);
       if (!moveTo(g, pawn, toil._tx, toil._ty, { adjacent: true })) return 'failed';
@@ -68,7 +69,7 @@ function registerToils(game, H) {
     tick(g, pawn, toil, job) {
       const t = g.entities.get(toil.targetId ?? job.targetId);
       if (!t || t.dead || t.removed) return 'failed';
-      if (Math.hypot(t.x - pawn.x, t.y - pawn.y) <= 1.5) {
+      if (nearPawn(pawn, t)) {
         stopMoving(pawn);
         return 'done';
       }
