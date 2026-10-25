@@ -26,7 +26,7 @@ export function ensureHealth(pawn) {
     h.pain = 0;
     h.bleed = 0;
     h.v = 1;
-    h.hp = h.maxHp;
+    if (!isSimple(pawn) || !Number.isFinite(h.hp)) h.hp = h.maxHp;
   }
   return h;
 }
@@ -50,8 +50,35 @@ export function normType(type) {
 function emptyCache() {
   return {
     v: -1, tick: -1, dmg: new Float32Array(N), eff: new Float32Array(N), prost: new Float32Array(N), missing: new Uint8Array(N),
-    covered: new Uint8Array(N), fracture: new Float32Array(N), caps: {}, pain: 0, bleed: 0, lethal: null, instant: null, downed: null,
+    covered: new Uint8Array(N), fracture: new Float32Array(N), scarMul: new Float32Array(N), caps: {}, pain: 0, bleed: 0, lethal: null, instant: null, downed: null,
+    capMul: { consciousness: 1, moving: 1, manipulation: 1, sight: 1, hearing: 1, breathing: 1, bloodPumping: 1, bloodFiltration: 1 },
+    ratio: 1, workMul: 1, moveMul: 1, armL: 1, armR: 1, legL: 1, legR: 1,
   };
+}
+
+/** Простое здоровье (боссы, щупальца, отражения): запас hp без частей тела. */
+export const isSimple = (pawn) => !!(pawn?.boss || pawn?.simpleHealth || pawn?.health?.simple);
+
+function simpleCache(game, pawn, c) {
+  const h = pawn.health;
+  const r = Math.max(0, Math.min(1, (h.hp ?? 100) / (h.maxHp || 100)));
+  c.tick = game.time.tick;
+  for (const k in c.capMul) c.caps[k] = 1;
+  c.eff.fill(1);
+  c.missing.fill(0);
+  c.covered.fill(0);
+  c.prost.fill(-1);
+  c.dmg.fill(0);
+  c.fracture.fill(0);
+  c.pain = 0;
+  c.bleed = 0;
+  c.lethal = null;
+  c.instant = null;
+  c.downed = null;
+  c.ratio = pawn.dead ? 0 : r;
+  c.workMul = c.moveMul = 1;
+  c.armL = c.armR = c.legL = c.legR = 1;
+  return c;
 }
 
 /** Утрачена ли часть (сама или предок); протез на предке «закрывает» потомков (covered). */
@@ -97,6 +124,7 @@ export function computeCache(game, pawn, force = false) {
   let c = pawn._hc;
   if (!c) c = pawn._hc = emptyCache();
   const tick = game.time.tick;
+  if (isSimple(pawn)) return simpleCache(game, pawn, c);
   if (!force && c.v === h.v && tick - c.tick < 30) return c;
   c.v = h.v;
   c.tick = tick;
@@ -104,11 +132,12 @@ export function computeCache(game, pawn, force = false) {
   computeCoverage(h, c);
   c.dmg.fill(0);
   c.fracture.fill(0);
-  const scarMul = new Float32Array(N).fill(1);
+  const scarMul = c.scarMul.fill(1);
   let pain = 0;
   let bleed = 0;
   let painMul = 1;
-  const capMul = { consciousness: 1, moving: 1, manipulation: 1, sight: 1, hearing: 1, breathing: 1, bloodPumping: 1, bloodFiltration: 1 };
+  const capMul = c.capMul;
+  for (const k in capMul) capMul[k] = 1;
   let workMul = 1;
   let moveMul = 1;
   let lethal = null;
@@ -121,7 +150,7 @@ export function computeCache(game, pawn, force = false) {
     if (kind === 'injury') {
       if (i !== undefined) c.dmg[i] += cd.sev;
       const norm = cd.sev / scale;
-      pain += norm * (def.pain ?? 0.01) * (tended ? 0.6 : 1);
+      pain += norm * (def.pain ?? 0.01) * (tended ? 0.4 : 1);
       if (blood && i !== undefined) {
         const ageH = (tick - (cd.born ?? tick)) / TICKS_PER_HOUR;
         const clot = norm < 6 ? Math.max(0, 1 - ageH / 3) : Math.max(0.35, 1 - ageH / 30);
@@ -129,7 +158,7 @@ export function computeCache(game, pawn, force = false) {
       }
     } else if (kind === 'fracture') {
       if (i !== undefined) c.fracture[i] = tended ? 0.5 : 0.25;
-      pain += (def.painFlat ?? 0.12) * (tended ? 0.6 : 1);
+      pain += (def.painFlat ?? 0.12) * (tended ? 0.45 : 1);
     } else if (kind === 'missing') {
       if (cd.fresh) {
         pain += tended ? 0.04 : def.painFlat ?? 0.1;
@@ -463,7 +492,7 @@ export function applyDamage(H, pawn, amount, opts = {}) {
   const h = ensureHealth(pawn);
   const type = normType(opts.type);
   const hpBefore = Math.max(1, h.hp ?? h.maxHp ?? 100);
-  if (h.simple || pawn.boss) {
+  if (isSimple(pawn)) {
     h.hp = Math.max(0, (h.hp ?? h.maxHp) - amount);
     if (h.hp <= 0) H.hooks.kill(pawn, opts.cause || type, opts);
     return amount;
@@ -610,6 +639,11 @@ export function heal(H, pawn, amount) {
   const h = ensureHealth(pawn);
   let left = Number(amount) || 0;
   if (left <= 0) return 0;
+  if (isSimple(pawn)) {
+    const before = h.hp ?? 0;
+    h.hp = Math.min(h.maxHp ?? 100, before + left);
+    return h.hp - before;
+  }
   const inj = h.conds.filter((c) => condDef(H.game, c.id)?.kind === 'injury').sort((a, b) => b.sev - a.sev);
   for (const cd of inj) {
     if (left <= 0) break;
@@ -631,7 +665,7 @@ export function heal(H, pawn, amount) {
 export function updatePawn(H, pawn, dtTicks) {
   const game = H.game;
   const h = ensureHealth(pawn);
-  if (h.simple || pawn.boss) return;
+  if (isSimple(pawn)) return;
   const tick = game.time.tick;
   const dtDays = dtTicks / TICKS_PER_DAY;
   const scale = scaleOf(h);

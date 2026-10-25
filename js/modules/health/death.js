@@ -4,7 +4,7 @@ import { EVENTS } from '../../core/events.js';
 import { FACTION, TICKS_PER_HOUR, TICKS_PER_DAY } from '../../core/constants.js';
 import { stopMoving } from '../../sim/pawn.js';
 import { ensureHealth, computeCache } from './model.js';
-import { BAL } from './defs.js';
+import { BAL, THOUGHT_DEFS } from './defs.js';
 
 const clamp100 = (v) => Math.max(0, Math.min(100, Number.isFinite(v) ? v : 0));
 export const firstName = (name) => String(name || '?').split(' ')[0];
@@ -264,28 +264,7 @@ export function addMemory(H, delta, reason = '') {
 }
 
 // ------------------------------------------------------------------ мысли (через mind)
-export const THOUGHTS = {
-  lover_died: { mood: -20, days: 25 },
-  family_died: { mood: -15, days: 18 },
-  friend_died: { mood: -10, days: 12 },
-  rival_died: { mood: -2, days: 3 },
-  colonist_died: { mood: -4, days: 5 },
-  leader_died: { mood: -8, days: 10 },
-  last_words_heard: { mood: -4, days: 6 },
-  nobody_heard: { mood: -8, days: 6 },
-  said_goodbye: { mood: 4, days: 5 },
-  buried_properly: { mood: 2, days: 4 },
-  not_buried: { mood: -6, days: 1 },
-  saw_corpse: { mood: -4, days: 1 },
-  saw_corpse_enemy: { mood: -1, days: 0.5 },
-  smelled_corpse: { mood: -5, days: 0.5 },
-  cremated_horror: { mood: -4, days: 4 },
-  he_carries_us: { mood: 3, days: 4 },
-  eulogy_moved: { mood: 3, days: 4 },
-  in_pain: { mood: -4, days: 0.06 },
-  lost_limb: { mood: -8, days: 15 },
-  keepsake_comfort: { mood: 2, days: 3 },
-};
+export const THOUGHTS = THOUGHT_DEFS;
 
 export function thought(game, pawn, id, extra = {}) {
   const t = THOUGHTS[id] || {};
@@ -337,13 +316,10 @@ export function startDying(H, pawn, cause) {
     game.events.emit('health:downed', { pawn, reason: 'dying' });
   }
   game.events.emit(EVENTS.HEALTH_LAST_BREATH, { pawn, untilTick: until });
-  if (game.speed > 1 || game.paused === false) {
-    if (game.speed > 1) game.setSpeed(1);
-  }
+  if (!game.paused && game.speed > 1) game.setSpeed(1);
+  safe(() => game.api.av.play('health_heartbeat', { x: pawn.x, y: pawn.y }));
   const text = pawn.isLeader ? game.t('health.log.leaderDying', { name: pawn.name }) : game.t('health.log.dying', { name: pawn.name });
   game.api.vision.report(text, { type: 'danger', x: pawn.x, y: pawn.y, pawnId: pawn.id });
-  H.rt.dyingSince ||= {};
-  H.rt.dyingSince[pawn.id] = typeof performance !== 'undefined' ? performance.now() : 0;
 }
 
 /** Выслушать последние слова (лидер рядом). @returns {string|null} */
@@ -510,7 +486,6 @@ export function staffPicked(H) {
   if (!H.state.staff) return;
   H.state.staff = null;
   H.game.api.ui.clearObjective('take_staff');
-  H.game.api.ui.notify(H.game.t('health.log.staffTaken'), { type: 'good' });
 }
 
 // ------------------------------------------------------------------ сцена смерти

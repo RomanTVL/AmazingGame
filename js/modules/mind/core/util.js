@@ -8,7 +8,7 @@ export const displayName = (p) => (p?.nameless ? '???' : firstName(p));
 
 /** Живой поселенец колонии (не животное). */
 export function isColonistPawn(p) {
-  return !!p && p.kind === 'pawn' && !p.dead && !p.removed && p.faction === 'colony' && !p.animal;
+  return !!p && p.kind === 'pawn' && !p.dead && !p.removed && p.faction === 'colony' && !p.animal && !p.prisoner;
 }
 
 /** Поселенец под управлением ИИ (не лидер-игрок). */
