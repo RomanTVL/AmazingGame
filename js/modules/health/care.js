@@ -136,6 +136,7 @@ function registerJobs(game, H) {
       for (const p of g.entities.ofKind('pawn')) {
         if (!isPatient(p) || p.carriedById || !needsCare(g, p)) continue;
         if (H.rt.urgentOnly && !isUrgent(g, p)) continue;
+        if (H.rt.near && d2(p, H.rt.near) > H.rt.near.r2) continue;
         if (p === pawn) {
           if (p.downed) continue;
         } else {
@@ -220,6 +221,7 @@ function registerJobs(game, H) {
       for (const p of g.entities.ofKind('pawn')) {
         if (!needsRescue(H, p) || p === pawn) continue;
         if (H.rt.urgentOnly && !isUrgent(g, p)) continue;
+        if (H.rt.near && d2(p, H.rt.near) > H.rt.near.r2) continue;
         if (J.isReserved(resKey.entity(p.id), pawn)) continue;
         const d = d2(p, pawn);
         if (d >= bestD) continue;
@@ -656,6 +658,31 @@ function registerInteractions(game, H) {
   const approach = (g, L, p) => {
     if (!g.player.walkTo(p.x, p.y)) g.audio.play('error');
   };
+  const HOLD_MS = 450;
+  const tx_ = (t) => (t.kind === 'corpse' ? t.x + 0.5 : t.x);
+  const ty_ = (t) => (t.kind === 'corpse' ? t.y + 0.5 : t.y);
+  /** Удержание E — поднять t; короткое нажатие — onTap (иначе подойти). */
+  const carryHold = (t, onTap) => {
+    let started = false;
+    return {
+      hold: true,
+      onHoldStart() {
+        started = false;
+      },
+      onHoldTick(g2, pawn, ms) {
+        if (started || ms < HOLD_MS) return;
+        started = true;
+        const ok = Math.hypot(pawn.x - tx_(t), pawn.y - ty_(t)) <= 2.4 && startCarry(H, pawn, t);
+        if (!ok) g2.audio.play('error');
+        else g2.audio.play('pickup', { x: pawn.x, y: pawn.y });
+      },
+      onRelease(g2, pawn, ms) {
+        if (started || ms >= HOLD_MS) return;
+        if (onTap) onTap(g2, pawn);
+        else if (Math.hypot(pawn.x - tx_(t), pawn.y - ty_(t)) > 2.4) approach(g2, pawn, { x: tx_(t), y: ty_(t) });
+      },
+    };
+  };
 
   // последние слова
   reg.add({
@@ -687,15 +714,16 @@ function registerInteractions(game, H) {
       if (!p) return null;
       if (p.dying && !p.dying.heard && p !== L) return null; // сперва — последние слова (order 5)
       const self = p === L;
-      return {
-        label: g.t(p.dying ? 'health.act.stabilize' : self ? 'health.act.tendSelf' : 'health.act.tend', { name: firstName(p.name) }),
-        x: tx,
-        y: ty,
-        run(g2, pawn) {
-          const med = findMedicine(g2, pawn);
-          if (!g2.jobs.startManual(pawn, 'health:tend', { targetId: p.id, x: Math.floor(p.x), y: Math.floor(p.y), data: { medId: med?.id || 0, patientId: p.id } })) g2.audio.play('error');
-        },
+      const label = g.t(p.dying ? 'health.act.stabilize' : self ? 'health.act.tendSelf' : 'health.act.tend', { name: firstName(p.name) });
+      const run = (g2, pawn) => {
+        const med = findMedicine(g2, pawn);
+        if (!g2.jobs.startManual(pawn, 'health:tend', { targetId: p.id, x: Math.floor(p.x), y: Math.floor(p.y), data: { medId: med?.id || 0, patientId: p.id } })) g2.audio.play('error');
       };
+      // упавшего можно и нести: короткое нажатие — перевязка, удержание — переноска (health:carry не перехватывается)
+      if (!self && !p.prisoner && canBeCarried(g, p) && canCarry(g, L)) {
+        return { label: `${label} · ${g.t('health.act.holdCarry')}`, x: tx, y: ty, run, ...carryHold(p, run) };
+      }
+      return { label, x: tx, y: ty, run };
     },
   }, 'health');
 
@@ -733,25 +761,7 @@ function registerInteractions(game, H) {
       if (!t) return null;
       if (!canCarry(g, L)) return { label: g.t('health.act.cantCarry'), x: tx, y: ty, hold: false, run: (g2) => g2.audio.play('error') };
       const name = firstName(t.name || '?');
-      let started = false;
-      return {
-        label: g.t(corpse ? 'health.act.carryBody' : 'health.act.carry', { name }),
-        x: tx,
-        y: ty,
-        onHoldStart() {
-          started = false;
-        },
-        onHoldTick(g2, pawn, ms) {
-          if (started || ms < 450) return;
-          started = true;
-          const ok = Math.hypot(pawn.x - (t.kind === 'corpse' ? t.x + 0.5 : t.x), pawn.y - (t.kind === 'corpse' ? t.y + 0.5 : t.y)) <= 2.4 && startCarry(H, pawn, t);
-          if (!ok) g2.audio.play('error');
-          else g2.audio.play('pickup', { x: pawn.x, y: pawn.y });
-        },
-        onRelease(g2, pawn, ms) {
-          if (!started && ms < 450 && Math.hypot(pawn.x - t.x, pawn.y - t.y) > 2.4) approach(g2, pawn, t.kind === 'corpse' ? { x: t.x + 0.5, y: t.y + 0.5 } : t);
-        },
-      };
+      return { label: g.t(corpse ? 'health.act.carryBody' : 'health.act.carry', { name }), x: tx, y: ty, ...carryHold(t, null) };
     },
   }, 'health');
 
@@ -773,31 +783,82 @@ function registerInteractions(game, H) {
   }, 'health');
 }
 
-/** Узел ИИ «Беда!»: врачи встают даже ночью, если кто-то истекает кровью или умирает. */
+const MELEE_R = 2.5;
+const BLEED_NEAR_R = 18;
+
+/** В ближнем бою: живой стоящий враг вплотную. */
+function inMelee(game, pawn) {
+  for (const o of game.entities.queryRadius(pawn.x, pawn.y, MELEE_R, 'pawn')) {
+    if (o === pawn || o.dead || o.downed || o.prisoner) continue;
+    if (safe(() => game.api.combat.isHostile(pawn, o), false)) return true;
+  }
+  return false;
+}
+
+/** Рядом (BLEED_NEAR_R) кто-то умирает или истекает кровью. */
+function bleederNear(game, pawn) {
+  const r2 = BLEED_NEAR_R * BLEED_NEAR_R;
+  for (const p of game.entities.ofKind('pawn')) {
+    if (p === pawn || p.dead || !(p.downed || p.dying) || d2(p, pawn) > r2 || !isUrgent(game, p)) continue;
+    if (p.dying || computeCache(game, p).bleed > 0.08) return true;
+  }
+  return false;
+}
+
+/** Узел ИИ «Беда!»: врачи встают даже ночью, если кто-то истекает кровью или умирает; бросают бой (не ближний). */
 function registerEmergency(game, H) {
+  const findUrgent = (g, pawn, near) => {
+    H.rt.urgentOnly = true;
+    H.rt.near = near ? { x: pawn.x, y: pawn.y, r2: BLEED_NEAR_R * BLEED_NEAR_R } : null;
+    try {
+      for (const id of ['health:rescue', 'health:tend']) {
+        const jt = g.defs.jobTypes.get(id);
+        const job = jt && g.jobs.tryJobType(jt, pawn);
+        if (job) return job;
+      }
+    } finally {
+      H.rt.urgentOnly = false;
+      H.rt.near = null;
+    }
+    return null;
+  };
+  const canHelp = (g, pawn) => !!H.rt.urgentCount && !pawn.downed && !pawn.drafted && !pawn.prisoner && g.api.health.canWork(pawn) && g.jobs.getPriority(pawn, 'doctoring') > 0;
   game.ai.registerThinkNode({
     id: 'health:emergency',
     priority: 86,
     interrupts: true,
     factions: ['colony'],
     evaluate(g, pawn) {
-      if (!H.rt.urgentCount || pawn.downed || pawn.drafted || pawn.prisoner) return null;
-      if (!g.api.health.canWork(pawn) || g.jobs.getPriority(pawn, 'doctoring') <= 0) return null;
+      if (!canHelp(g, pawn)) return null;
       const cur = pawn.job?.type;
       if (cur === 'health:tend' || cur === 'health:rescue') return null;
-      H.rt.urgentOnly = true;
-      try {
-        for (const id of ['health:rescue', 'health:tend']) {
-          const jt = g.defs.jobTypes.get(id);
-          const job = jt && g.jobs.tryJobType(jt, pawn);
-          if (job) return job;
-        }
-      } finally {
-        H.rt.urgentOnly = false;
-      }
-      return null;
+      if (cur === 'combat:fight') return emergencyFromFight(g, pawn);
+      return findUrgent(g, pawn, false);
     },
   }, 'health');
+  // бой (combat:fight, 96) ниже 86 не прерывается — тот же «Беда!» выше боя, только для дерущихся врачей
+  const emergencyFromFight = (g, pawn) => {
+    if (!canHelp(g, pawn) || pawn.job?.type !== 'combat:fight') return null;
+    if (inMelee(g, pawn) || !bleederNear(g, pawn)) return null;
+    return findUrgent(g, pawn, true);
+  };
+  game.ai.registerThinkNode({
+    id: 'health:emergencyFight',
+    priority: 96.5,
+    interrupts: true,
+    factions: ['colony'],
+    evaluate: (g, pawn) => emergencyFromFight(g, pawn),
+  }, 'health');
+}
+
+/** Перевязывают ли пешку прямо сейчас (врач или лидер в шаге работы задачи health:tend рядом с ней). */
+export function isBeingTended(game, p) {
+  for (const o of game.entities.queryRadius(p.x, p.y, 2.5, 'pawn')) {
+    const job = o.job;
+    if (o === p || o.dead || o.downed || !job || job.type !== 'health:tend' || job.targetId !== p.id) continue;
+    if (job.toils?.[job.i]?.type === 'work') return true;
+  }
+  return false;
 }
 
 /** Сколько срочных пациентов (раз в 30 тиков). */

@@ -34,7 +34,7 @@ import {
   chooseHeir, setHeir, getHeir, dropStaff, deathScene, causeLabel, firstName,
 } from './death.js';
 import { isCarrying, canCarry, startCarry, dropCarry, updateCarry, rebuildCarriers, carrySpeedMul, carriedOf } from './carry.js';
-import { registerCare, availableOps, scheduleOp, installProsthetic, amputate, doTend, countUrgent } from './care.js';
+import { registerCare, availableOps, scheduleOp, installProsthetic, amputate, doTend, countUrgent, isBeingTended } from './care.js';
 import { registerFunerals, updateFunerals, hourlyCorpses, dailyCorpses, cremate, chooseEulogy, eulogyOptions, activeFuneral, buryCarried } from './funeral.js';
 import { registerStrings } from './strings.js';
 import { registerUI } from './ui.js';
@@ -267,6 +267,8 @@ export function register(game) {
       const now = g.time.tick;
       for (const p of g.entities.ofKind('pawn')) {
         if (p.dead) continue;
+        // последнее дыхание не кончается, пока врач/лидер перевязывает
+        if (p.dying && isBeingTended(g, p)) p.dying.untilTick += 1;
         if (p.dying && now >= p.dying.untilTick) {
           finishDying(H, p);
           continue;

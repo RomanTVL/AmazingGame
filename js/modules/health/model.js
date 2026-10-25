@@ -13,6 +13,7 @@ BODY_PARTS.forEach((p, i) => (PART_INDEX[p.id] = i));
 const EXTERNAL = BODY_PARTS.filter((p) => p.coverage > 0);
 const TORSO_ORGANS = BODY_PARTS.filter((p) => p.parent === 'torso' && p.internal > 0);
 const VITAL = BODY_PARTS.filter((p) => p.vital).map((p) => p.id);
+const CRIT = BODY_PARTS.filter((p) => p.crit).map((p) => p.id);
 const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
 
 /** Гарантировать структуру здоровья (пешки из старых сейвов/чужих модулей). */
@@ -255,14 +256,33 @@ export function computeCache(game, pawn, force = false) {
   c.legR = leg('r');
   c.workMul = workMul;
   c.moveMul = moveMul;
+  // разрушенные туловище/шея/голова: не мгновенная смерть, а сильное кровотечение и «упал».
+  // Без перевязки состояние держится, пока рана тяжёлая (≥ 60%): чуть подживший край не ставит на ноги.
+  let crit = false;
+  for (const id of CRIT) {
+    const i = PART_INDEX[id];
+    if (c.missing[i] || c.prost[i] >= 0 || c.covered[i]) continue;
+    const max = PART[id].hp * scale;
+    const destroyed = c.dmg[i] >= max - 1e-6;
+    let marked = false;
+    let untended = false;
+    for (const x of h.conds) {
+      if (x.part !== id || (condDef(game, x.id)?.kind || x.kind) !== 'injury') continue;
+      if (x.crit) marked = true;
+      if (!(x.tq >= 0)) untended = true;
+    }
+    if (!destroyed && !(marked && untended && c.dmg[i] >= max * 0.6)) continue;
+    crit = true;
+    if (blood) bleed += BAL.critBleed * (PART[id].bleed ?? 1) * (untended ? 1 : 0.05);
+  }
   c.pain = pain;
   c.bleed = blood ? bleed : 0;
-  // мгновенная смерть: разрушен жизненно важный орган
+  // мгновенная смерть: разрушен мозг или сердце
   let instant = null;
   for (const id of VITAL) {
     const i = PART_INDEX[id];
     if (c.missing[i] || (c.prost[i] < 0 && !c.covered[i] && c.dmg[i] >= PART[id].hp * scale - 1e-6)) {
-      instant = id === 'brain' || id === 'head' ? 'brain' : id === 'heart' ? 'heart' : 'wounds';
+      instant = id === 'heart' ? 'heart' : 'brain';
       break;
     }
   }
@@ -274,7 +294,7 @@ export function computeCache(game, pawn, force = false) {
   c.lethal = lethal;
   let downed = null;
   if (caps.consciousness < BAL.downedConsciousness) downed = 'unconscious';
-  else if (pain >= BAL.painShock) downed = 'shock';
+  else if (pain >= BAL.painShock || crit) downed = 'shock';
   else if (bl >= BAL.downedBloodLoss) downed = 'blood_loss';
   else if (caps.moving < BAL.downedMoving) downed = 'cant_move';
   c.downed = downed;
@@ -460,6 +480,7 @@ export function damagePart(H, pawn, partId, amount, type, opts = {}, depth = 0) 
   touch(h);
   if (amount >= remaining - 1e-6) {
     res.destroyed = true;
+    if (P.crit) for (const x of h.conds) if (x.part === partId && x.id === condId) x.crit = true;
     if (P.sever) {
       // часть утрачена вместе с дочерними
       const gone = new Set([partId, ...DESCENDANTS[partId]]);
@@ -473,10 +494,11 @@ export function damagePart(H, pawn, partId, amount, type, opts = {}, depth = 0) 
       H.hooks.notifyPart?.(pawn, partId, 'lost');
     }
     const overflow = amount - take;
-    // отсечённая часть улетает с ударом — урон дальше не идёт; иначе часть удара достаётся родителю
-    if (overflow > 0.5 && P.parent && depth < 3 && !P.internal && !P.sever) {
+    // остаток удара (и после отсечения) достаётся родителю — не теряется
+    if (overflow > 0.5 && P.parent && depth < 3 && !P.internal) {
       const r = damagePart(H, pawn, P.parent, overflow * 0.6, type, opts, depth + 1);
       res.dealt += r.dealt;
+      if (r.lost) res.lost = r.lost;
     }
   }
   return res;
@@ -498,6 +520,7 @@ export function applyDamage(H, pawn, amount, opts = {}) {
     if (h.hp <= 0) H.hooks.kill(pawn, opts.cause || type, opts);
     return amount;
   }
+  const wasDowned = !!pawn.downed;
   if (type === 'starvation') {
     const cd = findCond(h, 'malnutrition') || addCondition(H, pawn, 'malnutrition', { severity: 0 });
     cd.sev = clamp01((cd.sev ?? 0) + BAL.starvePerHour * amount);
@@ -542,9 +565,9 @@ export function applyDamage(H, pawn, amount, opts = {}) {
     }
     game.events.emit('health:injured', { pawn, part, type, amount: dealt, source: opts.source || null, lost });
   }
-  // удар по несущему роняет ношу
-  if (amount >= 10 && pawn.carryPawnId) H.hooks.dropCarry?.(pawn, { reason: 'hit' });
-  afterChange(H, pawn, { amount, hpBefore, cause: opts.cause, type, opts });
+  // удар по несущему роняет ношу (раненого или тело)
+  if (amount >= 10 && (pawn.carryPawnId || pawn.carryCorpseId)) H.hooks.dropCarry?.(pawn, { reason: 'hit' });
+  afterChange(H, pawn, { amount, hpBefore, cause: opts.cause, type, opts, hit: true, lethal: !!opts.lethal, wasDowned });
   return dealt || amount;
 }
 
@@ -554,13 +577,22 @@ export function afterChange(H, pawn, info = {}) {
   if (pawn.dead || pawn.removed) return;
   const c = computeCache(game, pawn, true);
   if (c.instant) {
-    H.hooks.kill(pawn, info.cause || (c.instant === 'wounds' ? woundCause(info.type) : `${c.instant}_destroyed`), info.opts || {});
+    H.hooks.kill(pawn, info.cause || `${c.instant}_destroyed`, info.opts || {});
+    return;
+  }
+  // причина смерти от удара — сам удар, а не накопленная кровопотеря
+  const hitCause = info.hit ? info.cause || woundCause(info.type) : null;
+  // opts.lethal (добивание, казнь): удар, после которого пешка лежит или при смерти, убивает сразу
+  if (info.lethal && (c.lethal || c.downed || info.wasDowned || pawn.dying)) {
+    H.hooks.kill(pawn, hitCause, info.opts || {});
     return;
   }
   if (c.lethal) {
-    const overkill = info.amount > 0 && info.amount >= 2 * (info.hpBefore ?? 100);
+    // «сверхудар»: от полного запаса, но не меньше BAL.overkill — у лежачего h.hp≈0, порог от него убивал любым тычком
+    const scale = scaleOf(ensureHealth(pawn));
+    const overkill = info.hit && info.amount >= Math.max(BAL.overkill * scale, 2 * (info.hpBefore ?? 100));
     if (overkill || !H.hooks.canDieSlowly(pawn)) {
-      H.hooks.kill(pawn, info.cause || c.lethal, info.opts || {});
+      H.hooks.kill(pawn, hitCause || c.lethal, info.opts || {});
       return;
     }
     if (!pawn.dying) H.hooks.startDying(pawn, c.lethal);

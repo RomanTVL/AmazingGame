@@ -570,7 +570,7 @@ export function dealDamage(game, C, target, amount, opts = {}) {
   }
   target._lastHitBy = src?.id || 0;
   target._lastHitTick = now;
-  const dealt = safeNum(game.api.health.applyDamage(target, toApply, { part: opts.part, type, source: src, weapon: src?.equipment?.weapon }), 0, 1e5, toApply);
+  const dealt = safeNum(game.api.health.applyDamage(target, toApply, { part: opts.part, type, source: src, weapon: src?.equipment?.weapon, lethal: !!opts.lethal, cause: opts.cause }), 0, 1e5, toApply);
   if (downNow && !target.dead) {
     target.downed = true;
     if (target.job) game.jobs.endJob(target, 'cancelled');

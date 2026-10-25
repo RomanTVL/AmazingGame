@@ -27,6 +27,12 @@ async function fresh(seed = 7) {
   startNewColony(g, { seed });
   return g;
 }
+/** Уронить пешку через настоящий API здоровья: временное «без сознания» (а не p.downed = true). */
+function knockDown(g, p, hours = 48) {
+  g.api.health.addCondition(p, 'test_ko', { hours, caps: { consciousness: 0.05 }, label: 'KO' });
+  if (p.job) g.jobs.endJob(p, 'cancelled');
+  return !!p.downed;
+}
 const enemiesOf = (g) => g.entities.listKind('pawn').filter((p) => p.faction === 'enemy' && !p.dead);
 const C_ = (g) => g.api.combat.debugState();
 /** Поставить постройку в свободную клетку рядом с точкой. */
@@ -199,7 +205,7 @@ function placeNear(g, defId, x, y) {
     return origAdd(p, id, o);
   };
   L.equipment.armor = 'armor_leather';
-  L.downed = true;
+  ok(knockDown(g, L), 'лидер упал (через health)');
   const r = g.api.combat.spawnRaid({ faction: 'bandits', points: 30, x: L.x + 2, y: L.y });
   const raid = C_(g).S.raids.find((q) => q.id === r.id);
   raid.phase = 'rob';
@@ -227,7 +233,7 @@ function placeNear(g, defId, x, y) {
   g.events.on('combat:weaponNamed', (e) => (named = e));
   g.api.combat.spawnRaid({ faction: 'bandits', points: 25, x: p.x + 1, y: p.y });
   const foe = enemiesOf(g)[0];
-  foe.health.hp = 1;
+  ok(knockDown(g, foe), 'враг упал (через health)');
   g.api.combat.damage(foe, 50, { type: 'cut', source: p, lethal: true });
   ok(foe.dead, 'враг убит');
   ok(named && p.equipment.weaponMeta.nick && p.equipment.weaponMeta.kills === 10, `10 убийств — прозвище (${p.equipment.weaponMeta.nick})`);
@@ -276,10 +282,7 @@ function placeNear(g, defId, x, y) {
   placeNear(g, 'prisoner_bed', L.x + 3, L.y + 4);
   g.api.combat.spawnRaid({ faction: 'bandits', points: 60, x: L.x + 3, y: L.y });
   const en = enemiesOf(g);
-  for (const p of en) {
-    p.downed = true;
-    if (p.job) g.jobs.endJob(p, 'cancelled');
-  }
+  for (const p of en) knockDown(g, p);
   ok(g.api.combat.canCapture(en[0]), 'упавшего можно взять в плен');
   ok(g.api.combat.capture(en[0], L) && en[0].prisoner && en[0].faction === 'neutral', 'взят в плен');
   ok(en[0].prisoner.bedId > 0, 'назначена тюремная койка');
@@ -449,7 +452,6 @@ function placeNear(g, defId, x, y) {
   const xp0 = L.perks.xp + L.perks.level * 1000;
   g.api.combat.spawnRaid({ faction: 'bandits', points: 25, x: L.x + 2, y: L.y });
   const foe = enemiesOf(g)[0];
-  foe.health.hp = 5;
   let downed = false;
   for (let i = 0; i < 20 && !foe.downed && !foe.dead; i++) g.api.combat.damage(foe, 10, { type: 'blunt', source: L });
   downed = foe.downed;
@@ -464,8 +466,10 @@ function placeNear(g, defId, x, y) {
     g.events.emit('player:attack', { leader: L, x: foe.x, y: foe.y });
     C_(g).R.actions[C_(g).R.actions.length - 1].targetId = foe.id;
     const hp = foe.health.hp;
+    let hit = 0;
+    g.events.on('combat:hit', (e) => e.target === foe && e.damage > 0 && hit++);
     step(g, 2);
-    ok(foe.dead || foe.health.hp < hp, 'явный удар по упавшему врагу');
+    ok(foe.dead || foe.health.hp < hp || hit > 0, 'явный удар по упавшему врагу');
   }
   // итог рейда: все погибли при отходе → «отбито», не «ушли»
   let result = null;
@@ -484,15 +488,15 @@ function placeNear(g, defId, x, y) {
   step(g, 31);
   ok(result === 'repelled', `итог рейда при гибели всех: ${result}`);
   if (Number.isFinite(silver0)) ok(g.colony.silver >= silver0, 'украденное серебро вернулось');
-  // заглушка здоровья: враги не заживают, лежачие не умирают от голода
+  // раненый враг за час не выздоравливает; упавший поселенец не умирает
   g.api.combat.spawnRaid({ faction: 'bandits', points: 25, x: L.x + 9, y: L.y + 3 });
   const st = enemiesOf(g).find((e) => !e.downed);
-  st.health.hp = 20;
+  g.api.health.applyDamage(st, 12, { part: 'arm_l', type: 'cut' });
+  const stHp = st.health.hp;
   const col = g.colonists().find((p) => !p.isLeader);
-  col.downed = true;
-  col.health.hp = 1;
+  ok(knockDown(g, col, 3), 'поселенец упал (через health)');
   step(g, TICKS_PER_HOUR + 5);
-  ok(st.dead || st.health.hp <= 20, 'стоящие враги не заживают');
+  ok(st.dead || st.health.hp <= stHp + 1, `раненые враги не заживают за час (${stHp} → ${st.health.hp})`);
   ok(!col.dead && col.health.hp >= 9, 'упавший поселенец держится (минимум здоровья)');
 }
 

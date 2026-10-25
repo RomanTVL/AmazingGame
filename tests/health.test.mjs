@@ -188,7 +188,8 @@ console.log('6. Наследник, посох, «colony:lost»');
   L.health.bloodLoss = 1.05;
   H(g).applyDamage(L, 1, { part: 'foot_r', type: 'blunt' });
   ok(L.dying && g.getLeader() === L && !g.colony.lost, 'умирающий лидер — не конец игры');
-  run(g, 2600);
+  // пока врач перевязывает, таймер стоит — ждём дольше срока
+  for (let i = 0; i < 80 && !L.dead; i++) run(g, 100);
   ok(L.dead && g.getLeader() === heir && heir.controlled === 'player', 'власть перешла к наследнику');
   ok(log.some(([n, e]) => n === 'leader:died' && e.heir === heir), "'leader:died' {heir}");
   const staff = g.entities.listKind('item').find((i) => i.defId === 'conductor_staff');
@@ -295,6 +296,70 @@ console.log('9. Сохранение и загрузка');
   ok(H(g2).getFallen().length === 1 && H(g2).getMemory() === H(g).getMemory(), '«Павшие» и Память сохранились');
   run(g2, 600);
   ok(g2.errors.length === 0, 'после загрузки без ошибок');
+}
+
+// ---------------------------------------------------------------- 10. исправления MVP-1
+console.log('10. Исправления: смерть, добивание, переноска, таймер');
+{
+  const g = await make();
+  const L = g.getLeader();
+  const died = events(g, ['pawn:died']);
+  // туловище и шея — не мгновенная смерть: упал и сильно кровоточит
+  const a = colonist(g, 0);
+  H(g).applyDamage(a, 60, { part: 'torso', type: 'blunt' });
+  ok(!a.dead && a.downed && a.health.bleed > 0.5, `разрушенное туловище: жив, упал, кровотечение ${a.health.bleed}`);
+  const b = colonist(g, 1);
+  H(g).applyDamage(b, 40, { part: 'neck', type: 'cut' });
+  ok(!b.dead && b.downed, 'разрушенная шея: жив, упал');
+  // лежачего не добивает обычный удар
+  for (let i = 0; i < 3; i++) H(g).applyDamage(a, 9, { part: 'arm_r', type: 'cut' });
+  ok(!a.dead, 'три удара по лежачему — жив');
+  // opts.lethal добивает лежачего, причина — удар
+  H(g).applyDamage(a, 5, { part: 'arm_l', type: 'cut', lethal: true });
+  const ev = died.find(([, e]) => e.pawn === a);
+  ok(a.dead && ev && /^wounds_cut/.test(ev[1].cause), `opts.lethal добивает лежачего, причина: ${ev?.[1].cause}`);
+  // мозг — мгновенно
+  const c = colonist(g, 2);
+  H(g).applyDamage(c, 60, { part: 'brain', type: 'stab' });
+  ok(c.dead, 'разрушенный мозг — мгновенная смерть');
+  // урон сверх отсечённой части достаётся родителю
+  const d = colonist(g, 3) || L;
+  H(g).applyDamage(d, 40, { part: 'fingers_l', type: 'cut' });
+  ok(d.health.conds.some((x) => x.id === 'missing' && x.part === 'fingers_l') && d.health.conds.some((x) => x.id === 'cut' && x.part === 'hand_l'), 'остаток удара после отсечения — кисти');
+  // удар ≥10 роняет несомое тело
+  const corpse = g.entities.listKind('corpse')[0];
+  const carrier = L;
+  carrier.x = corpse.x + 0.5;
+  carrier.y = corpse.y + 0.5;
+  g.entities.moved(carrier);
+  ok(H(g).startCarry(carrier, corpse) && carrier.carryCorpseId === corpse.id, 'лидер несёт тело');
+  H(g).applyDamage(carrier, 10, { part: 'leg_l', type: 'blunt' });
+  ok(!carrier.carryCorpseId && !corpse.carriedById, 'удар ≥10 роняет тело');
+  // E: короткое — перевязка, удержание — нести
+  const it = g.defs.interactions.get('health:tend').find(g, L, Math.floor(b.x), Math.floor(b.y));
+  ok(it && it.hold && typeof it.onRelease === 'function' && typeof it.onHoldTick === 'function', 'E по упавшему: тап — перевязка, удержание — нести');
+  ok(g.ai.getNode('health:emergencyFight')?.priority > 96, '«Беда!» может прервать бой');
+  ok(g.errors.length === 0, `ошибок нет (${g.errors.map((e) => e.message).join('; ')})`);
+}
+{
+  // таймер последнего дыхания стоит, пока перевязывают
+  const g = await make();
+  const p = colonist(g);
+  p.health.bloodLoss = 1.05;
+  H(g).applyDamage(p, 1, { part: 'foot_r', type: 'blunt' });
+  ok(p.dying, 'при смерти');
+  const doc = colonist(g, 1);
+  doc.x = p.x + 1;
+  doc.y = p.y;
+  g.entities.moved(doc);
+  ok(g.jobs.startManual(doc, 'health:tend', { targetId: p.id, x: Math.floor(p.x), y: Math.floor(p.y), data: { medId: 0, patientId: p.id } }), 'врач начал перевязку');
+  let frozen = false;
+  for (let i = 0; i < 400 && !frozen; i++) {
+    const left = p.dying ? p.dying.untilTick - g.time.tick : -1;
+    run(g, 1);
+    if (doc.job?.type === 'health:tend' && doc.job.toils[doc.job.i]?.type === 'work' && p.dying && p.dying.untilTick - g.time.tick === left) frozen = true;
+  }
+  ok(frozen, 'таймер последнего дыхания замер во время перевязки');
 }
 
 console.log(`\n${checks - fails}/${checks} проверок`);

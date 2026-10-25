@@ -45,7 +45,7 @@ const RU = {
     act: {
       lastWords: 'Выслушать: {name}', tend: 'Перевязать: {name}', tendSelf: 'Перевязать себя', stabilize: 'Стабилизировать: {name}',
       surgery: 'Операция: {name} ({part})', carry: 'Нести: {name} [удерживать]', carryBody: 'Нести тело: {name} [удерживать]',
-      cantCarry: 'Руки повреждены — не поднять', putDown: 'Положить: {name}', putInBed: 'Уложить в кровать: {name}',
+      cantCarry: 'Руки повреждены — не поднять', holdCarry: 'удерживать — нести', putDown: 'Положить: {name}', putInBed: 'Уложить в кровать: {name}',
       putBody: 'Опустить тело', putHearse: 'Оставить тело здесь', buryHere: 'Похоронить здесь: {name}', cremate: 'Предать огню: {name} [удерживать]',
     },
     carry: { dropped: 'Уронил!' },
@@ -192,7 +192,7 @@ const EN = {
     job: { tend: 'tending wounds', rescue: 'rescuing', feed: 'feeding a patient', surgery: 'operating', bury: 'burying', funeral: 'at a funeral', waitTend: 'waiting for a doctor' },
     act: {
       lastWords: 'Listen to {name}', tend: 'Tend: {name}', tendSelf: 'Tend yourself', stabilize: 'Stabilize: {name}', surgery: 'Surgery: {name} ({part})',
-      carry: 'Carry {name} [hold]', carryBody: 'Carry body: {name} [hold]', cantCarry: 'Arms injured — cannot lift', putDown: 'Put {name} down',
+      carry: 'Carry {name} [hold]', carryBody: 'Carry body: {name} [hold]', cantCarry: 'Arms injured — cannot lift', holdCarry: 'hold — carry', putDown: 'Put {name} down',
       putInBed: 'Put in bed: {name}', putBody: 'Lay the body down', putHearse: 'Leave the body here', buryHere: 'Bury here: {name}', cremate: 'Give to the fire: {name} [hold]',
     },
     carry: { dropped: 'Dropped!' },

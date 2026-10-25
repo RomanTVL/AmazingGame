@@ -5,11 +5,12 @@
 /**
  * Часть тела. Внешние части (coverage) получают удары напрямую; внутренние (internal) — только сквозь родителя
  * (torso/head). group — конечность (для протезов/цепочек), side — 'l'|'r', bone — может сломаться,
- * sever — при разрушении отрывается (утрачивается вместе с дочерними), vital — разрушение = мгновенная смерть,
+ * sever — при разрушении отрывается (утрачивается вместе с дочерними), vital — разрушение = мгновенная смерть
+ * (только мозг и сердце), crit — разрушение = сильное кровотечение и «упал» (дальше — последнее дыхание),
  * bleed — множитель кровотечения, size — относительный размер для отрисовки.
  */
 export const BODY_PARTS = [
-  { id: 'torso', hp: 40, coverage: 0.3, vital: true, bleed: 1 },
+  { id: 'torso', hp: 40, coverage: 0.3, crit: true, bleed: 1 },
   { id: 'ribs', parent: 'torso', hp: 30, internal: 0.16, bone: true, bleed: 0.6 },
   { id: 'spine', parent: 'torso', hp: 25, internal: 0.07, bone: true, bleed: 0.5 },
   { id: 'heart', parent: 'torso', hp: 15, internal: 0.07, vital: true, bleed: 2.2 },
@@ -19,8 +20,8 @@ export const BODY_PARTS = [
   { id: 'stomach', parent: 'torso', hp: 20, internal: 0.12, bleed: 1.1 },
   { id: 'kidney_l', parent: 'torso', hp: 15, internal: 0.07, side: 'l', bleed: 1.3 },
   { id: 'kidney_r', parent: 'torso', hp: 15, internal: 0.07, side: 'r', bleed: 1.3 },
-  { id: 'neck', parent: 'torso', hp: 25, coverage: 0.04, vital: true, bleed: 2 },
-  { id: 'head', parent: 'neck', hp: 25, coverage: 0.08, vital: true, bone: true, bleed: 1.2 },
+  { id: 'neck', parent: 'torso', hp: 25, coverage: 0.04, crit: true, bleed: 2 },
+  { id: 'head', parent: 'neck', hp: 25, coverage: 0.08, crit: true, bone: true, bleed: 1.2 },
   { id: 'brain', parent: 'head', hp: 10, internal: 1, vital: true, bleed: 1 },
   { id: 'eye_l', parent: 'head', hp: 10, coverage: 0.012, side: 'l', sever: true, bleed: 0.6, group: 'eye_l' },
   { id: 'eye_r', parent: 'head', hp: 10, coverage: 0.012, side: 'r', sever: true, bleed: 0.6, group: 'eye_r' },
@@ -133,6 +134,8 @@ export const BAL = {
   downedConsciousness: 0.3,
   downedMoving: 0.15,
   downedBloodLoss: 0.6,
+  critBleed: 1.6, // доп. кровопотеря (доля крови в сутки) при разрушенной crit-части, без перевязки
+  overkill: 45, // удар не меньше этого (×масштаб) убивает лежачего сразу, без последнего дыхания
   treatHours: 20,
   dyingMin: 1800,
   dyingMax: 2400,
