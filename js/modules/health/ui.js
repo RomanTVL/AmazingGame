@@ -814,7 +814,7 @@ export function registerUI(game, H) {
     id: 'health_eulogy',
     title: 'health.eulogy.title',
     width: 600,
-    height: 330,
+    height: 280,
     anchor: 'left',
     draw: (ctx, g, ui, r) => drawEulogyPanel(ctx, g, ui, r, H),
     onClose: () => {
