@@ -11,6 +11,7 @@ import { gearSprite, hasStaff, weaponStats } from './items.js';
 import { SPELLS, activeSlots, xpForLevel, chooseUpgrade, cycleSlot, upgradeDef } from './leader.js';
 import { FACTIONS } from './enemies.js';
 import { AMMO_PER_CRYSTAL } from './defense.js';
+import { VERTEBRA_OFF } from './bosses.js';
 import { realNow } from './state.js';
 
 const T = TILE;
@@ -361,9 +362,10 @@ function drawDragon(ctx, p, game, view) {
   ctx.restore();
   // уязвимый позвонок — светится после выдоха
   const weak = p.boss?.weakUntil > game.time.tick;
-  const vx = x - Math.cos(dir) * 6 * S;
-  const vy = y - 6 - Math.sin(dir) * 6 * S;
-  drawGlow(ctx, vx, vy, weak ? 22 : 8, weak ? '#ffd27a' : '#9fb8ff', weak ? 0.9 : 0.35);
+  const vx = x - Math.cos(dir) * VERTEBRA_OFF * T;
+  const vy = y - Math.sin(dir) * VERTEBRA_OFF * T;
+  drawGlow(ctx, vx, vy, weak ? 24 : 9, weak ? '#ffd27a' : '#9fb8ff', weak ? 0.95 : 0.4);
+  if (weak) neonCircle(ctx, vx, vy, 9 + Math.sin(t * 12) * 1.5, '#ffd27a', 1.2, null, 0.5);
   if (weak) {
     ctx.fillStyle = '#fff6d0';
     ctx.beginPath();
@@ -377,43 +379,79 @@ function drawLich(ctx, p, game, view) {
   const x = p.x * T;
   const y = p.y * T;
   const t = view.time + p.id;
-  const fl = Math.sin(t * 2) * 2;
   const clone = p.enemyId === 'lich_clone';
-  const a = clone ? 0.55 : 1;
-  ctx.globalAlpha = a;
-  ctx.fillStyle = 'rgba(0,0,0,0.35)';
+  const S = 1.9;
+  const fl = Math.sin(t * 2) * 2;
+  // тень и аура
+  ctx.fillStyle = 'rgba(0,0,0,0.4)';
   ctx.beginPath();
-  ctx.ellipse(x, y + 9, 10, 4, 0, 0, TAU);
+  ctx.ellipse(x, y + 14, 18, 6, 0, 0, TAU);
   ctx.fill();
-  // мантия
+  drawGlow(ctx, x, y - 10, 46, '#c77dff', clone ? 0.12 : 0.3);
+  ctx.save();
+  ctx.globalAlpha = clone ? 0.55 : 1;
+  ctx.translate(x, y + fl);
+  ctx.scale(S, S);
+  // рваная мантия
   ctx.fillStyle = '#1a0f2a';
   ctx.strokeStyle = '#c77dff';
-  ctx.lineWidth = 1.4;
+  ctx.lineWidth = 1.1;
   ctx.beginPath();
-  ctx.moveTo(x - 10, y + 8 + fl * 0.3);
-  ctx.quadraticCurveTo(x - 6, y - 8 + fl, x, y - 12 + fl);
-  ctx.quadraticCurveTo(x + 6, y - 8 + fl, x + 10, y + 8 + fl * 0.3);
-  ctx.quadraticCurveTo(x, y + 4 + fl, x - 10, y + 8 + fl * 0.3);
+  ctx.moveTo(-10, 8);
+  ctx.quadraticCurveTo(-7, -6, 0, -11);
+  ctx.quadraticCurveTo(7, -6, 10, 8);
+  for (let i = 0; i <= 5; i++) ctx.lineTo(10 - i * 4, 8 + (i % 2 ? 3 + Math.sin(t * 3 + i) : 0));
+  ctx.closePath();
   ctx.fill();
   ctx.stroke();
-  // корона и глаза
-  ctx.fillStyle = '#e8f4ff';
-  ctx.beginPath();
-  ctx.arc(x, y - 12 + fl, 4.5, 0, TAU);
-  ctx.fill();
-  ctx.strokeStyle = '#ffd27a';
+  // наплечники-кости
+  ctx.strokeStyle = '#e8f4ff';
   ctx.lineWidth = 1.2;
   ctx.beginPath();
+  ctx.moveTo(-8, -5);
+  ctx.lineTo(-12, -8);
+  ctx.moveTo(8, -5);
+  ctx.lineTo(12, -8);
+  ctx.stroke();
+  // посох с черепом-сферой
+  ctx.strokeStyle = '#5a3a6a';
+  ctx.lineWidth = 1.4;
+  ctx.beginPath();
+  ctx.moveTo(11, 9);
+  ctx.lineTo(13, -15);
+  ctx.stroke();
+  // череп, корона, глаза
+  ctx.fillStyle = '#e8f4ff';
+  ctx.beginPath();
+  ctx.arc(0, -12, 4.2, 0, TAU);
+  ctx.fill();
+  ctx.strokeStyle = '#ffd27a';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
   for (let i = -2; i <= 2; i++) {
-    ctx.moveTo(x + i * 2, y - 16 + fl);
-    ctx.lineTo(x + i * 2, y - 19 + fl - (i === 0 ? 2 : 0));
+    ctx.moveTo(i * 1.8, -15.5);
+    ctx.lineTo(i * 1.8, -18.5 - (i === 0 ? 2 : 0));
   }
   ctx.stroke();
   ctx.fillStyle = '#ff4fd8';
-  ctx.fillRect(x - 2.4, y - 13 + fl, 1.6, 1.6);
-  ctx.fillRect(x + 0.8, y - 13 + fl, 1.6, 1.6);
-  ctx.globalAlpha = 1;
-  drawGlow(ctx, x, y - 6 + fl, 22, '#c77dff', clone ? 0.15 : 0.35);
+  ctx.fillRect(-2.3, -13, 1.6, 1.6);
+  ctx.fillRect(0.7, -13, 1.6, 1.6);
+  ctx.restore();
+  // сфера посоха и руны вокруг
+  const ox = x + 13 * S;
+  const oy = y + fl - 15 * S;
+  drawGlow(ctx, ox, oy, 16, '#ff4fd8', clone ? 0.3 : 0.85);
+  ctx.fillStyle = '#ffe0fa';
+  ctx.beginPath();
+  ctx.arc(ox, oy, 3, 0, TAU);
+  ctx.fill();
+  if (!clone) {
+    ctx.fillStyle = '#c77dff';
+    for (let i = 0; i < 5; i++) {
+      const a = t * 1.2 + (i / 5) * TAU;
+      ctx.fillRect(x + Math.cos(a) * 26 - 1.5, y - 8 + Math.sin(a) * 9 - 1.5, 3, 3);
+    }
+  }
 }
 
 function drawHeart(ctx, p, game, view) {
@@ -1224,57 +1262,55 @@ function registerHud(game, C) {
     },
   }, 'combat');
 
-  // индикатор рейда и призыва
+  // индикатор рейда, призыва и полоса босса — под списком поселенцев (слева сверху), на непрозрачной подложке
   ui.registerHud({
     id: 'combat:raid',
-    slot: 'top-center',
-    order: 60,
+    slot: 'top-left',
+    order: 30,
     visible: (g) => C.S.raids.length > 0 || C.R.colony.some((p) => p.drafted),
     draw(ctx, g, ui2, box) {
-      const parts = [];
+      const rows = [];
       for (const r of C.S.raids) {
-        if (r.kind === 'boss') continue; // у босса — своя полоса с именем
+        const f = FACTIONS[r.faction];
+        if (r.kind === 'boss') {
+          const b = g.entities.get(r.bossId);
+          if (b && !b.dead) rows.push({ boss: b });
+          continue;
+        }
         let alive = 0;
         for (const id of r.pawnIds) {
           const p = g.entities.get(id);
           if (p && !p.dead && !p.downed && p.faction === 'enemy') alive++;
         }
-        const f = FACTIONS[r.faction];
-        parts.push({ text: g.t(r.kind === 'boss' ? 'combat.hud.boss' : 'combat.hud.raid', { faction: g.t(f?.nameKey || 'combat.faction.bandits'), n: alive }), color: f?.color || '#ff5f6d' });
+        rows.push({ text: g.t('combat.hud.raid', { faction: g.t(f?.nameKey || 'combat.faction.bandits'), n: alive }), color: f?.color || '#ff5f6d' });
       }
       const dr = C.R.colony.filter((p) => p.drafted).length;
-      if (dr) parts.push({ text: g.t('combat.hud.drafted', { n: dr }), color: '#ff4f4f' });
-      if (!parts.length) return 0;
-      let y = box.y;
-      for (const pt of parts) {
-        const w = ui2.measure(pt.text, 12, true) + 28;
-        ctx.fillStyle = 'rgba(30,6,14,0.85)';
-        roundRect(ctx, box.x - w / 2, y, w, 22, 11);
-        ctx.fill();
-        ctx.strokeStyle = rgba(pt.color, 0.8);
-        ctx.lineWidth = 1;
-        roundRect(ctx, box.x - w / 2 + 0.5, y + 0.5, w - 1, 21, 11);
-        ctx.stroke();
-        ui2.text(pt.text, box.x, y + 11, { size: 12, bold: true, align: 'center', baseline: 'middle', color: pt.color });
-        y += 26;
+      if (dr) rows.push({ text: g.t('combat.hud.drafted', { n: dr }), color: '#ff4f4f' });
+      if (!rows.length) return 0;
+      const w = 230;
+      const h = 10 + rows.reduce((a, r) => a + (r.boss ? 34 : 20), 0);
+      ui2.panel(box.x, box.y, w, h, { accent: '#ff4f6d', bg: 'rgba(12,6,16,0.96)' });
+      let y = box.y + 6;
+      for (const r of rows) {
+        if (r.boss) {
+          const b = r.boss;
+          const k = clamp01((b.health?.hp ?? 0) / (b.health?.maxHp || 1));
+          ui2.text(g.t(`combat.enemy.${b.enemyId}`), box.x + 10, y + 1, { size: 12, bold: true, color: '#ffd27a' });
+          ctx.fillStyle = 'rgba(0,0,0,0.7)';
+          ctx.fillRect(box.x + 10, y + 19, w - 20, 7);
+          ctx.fillStyle = '#ff4f9a';
+          ctx.fillRect(box.x + 10, y + 19, (w - 20) * k, 7);
+          ctx.strokeStyle = 'rgba(255,79,154,0.7)';
+          ctx.lineWidth = 1;
+          ctx.strokeRect(box.x + 10.5, y + 19.5, w - 21, 6);
+          y += 34;
+        } else {
+          drawGlow(ctx, box.x + 14, y + 8, 8, r.color, 0.7);
+          ui2.text(r.text, box.x + 24, y + 1, { size: 12, bold: true, color: r.color });
+          y += 20;
+        }
       }
-      // боссы — полоса здоровья
-      for (const r of C.S.raids) {
-        if (r.kind !== 'boss') continue;
-        const b = g.entities.get(r.bossId);
-        if (!b || b.dead) continue;
-        const w = 360;
-        const k = clamp01((b.health?.hp ?? 0) / (b.health?.maxHp || 1));
-        ui2.text(g.t(`combat.enemy.${b.enemyId}`), box.x, y + 2, { size: 13, bold: true, align: 'center', color: '#ffd27a', glow: 6 });
-        ctx.fillStyle = 'rgba(0,0,0,0.6)';
-        ctx.fillRect(box.x - w / 2, y + 20, w, 7);
-        ctx.fillStyle = '#ff4f9a';
-        ctx.fillRect(box.x - w / 2, y + 20, w * k, 7);
-        ctx.strokeStyle = 'rgba(255,79,154,0.7)';
-        ctx.strokeRect(box.x - w / 2 + 0.5, y + 20.5, w - 1, 6);
-        y += 32;
-      }
-      return y - box.y;
+      return h;
     },
   }, 'combat');
 }
@@ -1344,10 +1380,15 @@ function registerPanels(game, C) {
     id: 'combat_prisoners',
     title: 'combat.panel.prisoners',
     width: 420,
-    height: 420,
+    height: 150,
     anchor: 'right',
     draw(ctx, g, ui, r) {
       const list = g.entities.listKind('pawn').filter((p) => p.prisoner && !p.dead);
+      // компактно: высота по числу пленных (применится со следующего кадра); подложка плотнее стандартной
+      const def = g.ui.panels.get('combat_prisoners');
+      if (def) def.height = Math.min(620, 66 + Math.max(1, list.length) * 92);
+      ctx.fillStyle = 'rgba(7,9,20,0.95)';
+      ctx.fillRect(r.x - 6, r.y - 4, r.w + 12, r.h + 8);
       if (!list.length) {
         ui.text(g.t('combat.panel.noPrisoners'), r.x, r.y, { color: '#8c93b8' });
         return;
@@ -1355,7 +1396,7 @@ function registerPanels(game, C) {
       let y = r.y;
       for (const p of list) {
         const sel = C.R.prisonerSel === p.id;
-        ctx.fillStyle = sel ? 'rgba(255,179,71,0.12)' : 'rgba(255,255,255,0.03)';
+        ctx.fillStyle = sel ? 'rgba(255,179,71,0.14)' : 'rgba(255,255,255,0.05)';
         ctx.fillRect(r.x, y, r.w, 84);
         ui.text(p.name, r.x + 8, y + 6, { size: 13, bold: true, color: '#ffb347' });
         const ed = g.defs.enemies.get(p.enemyId);

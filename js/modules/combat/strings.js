@@ -44,6 +44,7 @@ const ru = {
       staff: ['Палку не трожь — проклятая.', 'Посох оставь, от него руки чешутся.', 'Брось эту палку, она смотрит.'],
       staffRude: ['Палку не трожь — она, зараза, проклятая.', 'Посох оставь, к чёрту его.', 'Брось эту хрень, она смотрит.'],
       robbed: '{who} шарит по карманам: {victim}.',
+      silverBack: 'Украденное серебро вернулось: {n}.',
     },
     fire: { started: 'Пожар: горит {name}!' },
     turret: { empty: 'Рунная турель без зарядов — нужны кристаллы маны.' },
@@ -189,7 +190,7 @@ const en = {
     nicknames: ['Aunt Vera', 'Last Argument', 'The Poker', 'Lullaby', 'Quiet Hour', 'Matchmaker', 'Mean Mary', 'Last Rites', "Grandpa's Regards", "Granny's Pie", 'Draft', 'Mother-in-law'],
     nick: { withMaker: '{nick} by {maker}', named: '{who}: the {weapon} is now called "{nick}".', say: ['Hello, {nick}.', 'You are {nick} now.', "{nick}, don't let me down."] },
     staff: { objective: "Pick up the conductor's staff" },
-    rob: { staff: ["Don't touch the stick, it's cursed.", 'Leave the staff, it makes my hands itch.', 'Drop that stick, it is watching.'], staffRude: ["Don't touch the damn stick, it's cursed.", 'Leave the bloody staff.', 'Drop that damn thing, it is watching.'], robbed: '{who} is robbing {victim}.' },
+    rob: { staff: ["Don't touch the stick, it's cursed.", 'Leave the staff, it makes my hands itch.', 'Drop that stick, it is watching.'], staffRude: ["Don't touch the damn stick, it's cursed.", 'Leave the bloody staff.', 'Drop that damn thing, it is watching.'], robbed: '{who} is robbing {victim}.', silverBack: 'Stolen silver recovered: {n}.' },
     fire: { started: 'Fire: {name} is burning!' },
     turret: { empty: 'A rune turret is out of charges — bring mana crystals.' },
     arms: {

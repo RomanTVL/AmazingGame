@@ -128,6 +128,9 @@ function placeNear(g, defId, x, y) {
   L.equipment.weapon = null;
   const sp = g.api.combat.getSpells(L);
   ok(sp.mode === 'nostaff' && sp.slots[0] === 'spark' && !sp.slots[1], 'без посоха — только Искра');
+  L.mana.cur = 100;
+  L.perks.cd = {};
+  ok(!g.api.combat.castSpell(L, 'fireball', L.x + 3, L.y), 'castSpell(id) без посоха — огненный шар запрещён');
   step(g, 2);
   ok(L.mana.max === 30, 'без посоха мана ×0.3');
   // непослушный посох
@@ -139,7 +142,7 @@ function placeNear(g, defId, x, y) {
   for (let i = 0; i < 30; i++) {
     L.mana.cur = 100;
     L.perks.cd = {};
-    g.api.combat.castSpell(L, 'spark', L.x + 3, L.y);
+    g.api.combat.castSpell(L, 'fireball', L.x + 3, L.y);
   }
   ok(fizz > 3 && fizz < 20, `непослушный посох: ~30% осечек (${fizz}/30)`);
   // ученик-наследник
@@ -356,8 +359,13 @@ function placeNear(g, defId, x, y) {
   ok(dragon.boss.weakUntil > 0, 'позвонок открыт после выдоха');
   dragon.boss.weakUntil = g.time.tick + 100;
   const hpD = dragon.health.hp;
-  g.api.combat.damage(dragon, 10, { type: 'blunt', source: L });
-  ok(hpD - dragon.health.hp >= 25, 'уязвимость ×3');
+  g.api.combat.damage(dragon, 10, { type: 'blunt', source: L, hitX: dragon.x, hitY: dragon.y });
+  const hpD2 = dragon.health.hp;
+  ok(hpD - hpD2 < 15, 'удар в корпус — без множителя');
+  const { dragonVertebra } = await import('../js/modules/combat/bosses.js');
+  const vt = dragonVertebra(dragon);
+  g.api.combat.damage(dragon, 10, { type: 'blunt', source: L, hitX: vt.x, hitY: vt.y });
+  ok(hpD2 - dragon.health.hp >= 25, 'удар в светящийся позвонок ×3');
   g.api.combat.damage(dragon, 99999, { type: 'blunt', source: L, lethal: true });
   step(g, 31);
   ok(defeated.includes('bone_dragon'), 'boss:defeated bone_dragon');
@@ -421,6 +429,71 @@ function placeNear(g, defId, x, y) {
     return JSON.stringify(h.entities.listKind('pawn').map((q) => [q.id, q.x.toFixed(3), q.y.toFixed(3), Math.round(q.health.hp)])) + h.rng.state;
   };
   ok((await fp()) === (await fp()), 'детерминизм боя');
+}
+
+// ---------- 12. Разрушение построек, засчёт упавших, итог рейда, серебро, заживление ----------
+{
+  const g = await fresh(14);
+  const L = g.getLeader();
+  // постройка разрушается уроном боя и огнём без исключений
+  const b1 = placeNear(g, 'prisoner_bed', L.x + 4, L.y + 5);
+  g.api.combat.damage(b1, 9999, {});
+  ok(b1.removed, 'постройка разрушена уроном');
+  const b2 = placeNear(g, 'spike_trap', L.x + 6, L.y + 6);
+  b2.hp = 6;
+  g.api.combat.ignite(b2);
+  step(g, 200);
+  ok(b2.removed, 'постройка сгорела');
+  ok(g.errors.length === 0, `ошибки при разрушении: ${g.errors.map((e) => e.where + ' ' + e.message)}`);
+  // упавший враг засчитывается лидеру (опыт)
+  const xp0 = L.perks.xp + L.perks.level * 1000;
+  g.api.combat.spawnRaid({ faction: 'bandits', points: 25, x: L.x + 2, y: L.y });
+  const foe = enemiesOf(g)[0];
+  foe.health.hp = 5;
+  let downed = false;
+  for (let i = 0; i < 20 && !foe.downed && !foe.dead; i++) g.api.combat.damage(foe, 10, { type: 'blunt', source: L });
+  downed = foe.downed;
+  ok(foe.dead || (downed && foe.creditedTo === L.id), 'падение врага засчитано лидеру');
+  ok(L.perks.xp + L.perks.level * 1000 > xp0, 'лидер получил опыт за поверженного');
+  // добить упавшего — только явным выбором (ЛКМ по нему)
+  if (downed) {
+    L.x = foe.x - 1;
+    L.y = foe.y;
+    g.entities.moved(L);
+    L._nextAtk = 0;
+    g.events.emit('player:attack', { leader: L, x: foe.x, y: foe.y });
+    C_(g).R.actions[C_(g).R.actions.length - 1].targetId = foe.id;
+    const hp = foe.health.hp;
+    step(g, 2);
+    ok(foe.dead || foe.health.hp < hp, 'явный удар по упавшему врагу');
+  }
+  // итог рейда: все погибли при отходе → «отбито», не «ушли»
+  let result = null;
+  g.events.on('combat:raidEnded', (e) => (result = e.result));
+  const r = g.api.combat.spawnRaid({ faction: 'bandits', points: 50, x: L.x + 8, y: L.y });
+  const raid = C_(g).S.raids.find((q) => q.id === r.id);
+  raid.phase = 'retreat';
+  for (const id of r.pawnIds) {
+    const e = g.entities.get(id);
+    if (e && !e.dead) {
+      e.loot = [{ defId: 'silver', count: 7, virtual: true }];
+      g.api.combat.damage(e, 9999, { type: 'cut', source: L, lethal: true });
+    }
+  }
+  const silver0 = g.colony.silver;
+  step(g, 31);
+  ok(result === 'repelled', `итог рейда при гибели всех: ${result}`);
+  if (Number.isFinite(silver0)) ok(g.colony.silver >= silver0, 'украденное серебро вернулось');
+  // заглушка здоровья: враги не заживают, лежачие не умирают от голода
+  g.api.combat.spawnRaid({ faction: 'bandits', points: 25, x: L.x + 9, y: L.y + 3 });
+  const st = enemiesOf(g).find((e) => !e.downed);
+  st.health.hp = 20;
+  const col = g.colonists().find((p) => !p.isLeader);
+  col.downed = true;
+  col.health.hp = 1;
+  step(g, TICKS_PER_HOUR + 5);
+  ok(st.dead || st.health.hp <= 20, 'стоящие враги не заживают');
+  ok(!col.dead && col.health.hp >= 9, 'упавший поселенец держится (минимум здоровья)');
 }
 
 console.log('—'.repeat(50));

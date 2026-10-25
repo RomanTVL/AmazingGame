@@ -185,7 +185,7 @@ export function cycleSlot(game, p, slot) {
 // ---------------- Атака лидера (ЛКМ) ----------------
 const BOLT = { damage: 8, range: 10, speed: 26, type: 'rune', projectile: 'rune', sfx: 'combat:rune_shot' };
 
-export function leaderAttack(game, C, L, x, y) {
+export function leaderAttack(game, C, L, x, y, targetId = 0) {
   if (!L || L.dead || L.downed) return false;
   if (!attackReady(game, L)) return false;
   const w = weaponStats(game, C, L);
@@ -208,11 +208,16 @@ export function leaderAttack(game, C, L, x, y) {
     if (!isHostile(L, o)) continue;
     hits.push(o);
   }
+  // явно выбранного упавшего врага можно добить (осознанный выбор игрока)
+  if (!hits.length && targetId) {
+    const t = game.entities.get(targetId);
+    if (t && !t.dead && t.downed && t.faction === 'enemy' && !t.prisoner && dist(L.x, L.y, t.x, t.y) <= reach + 0.4) hits.push(t);
+  }
   // нить Лича тоже можно перерубить посохом
   if (!hits.length && C.S.threads.length) C.hitThreadsAt(L.x + Math.cos(ang) * 1.2, L.y + Math.sin(ang) * 1.2, 0.9, w.damage * 1.5, null);
   if (hits.length) {
     for (const o of hits) meleeStrike(game, C, L, o, w, { accBonus: 0.1, dmgMul: 1 + 0.04 * ((L.perks?.level || 1) - 1) });
-    C.R.leaderTargetId = hits[0].id;
+    if (!hits[0].downed) C.R.leaderTargetId = hits[0].id;
     setCooldown(game, L, w.cooldown);
     return true;
   }

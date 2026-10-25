@@ -154,9 +154,41 @@ function reachDist(p, t) {
  * Сблизиться и атаковать. hold — не сходить с места (стрелок у окна, строй).
  * @returns {'attack'|'move'|'blocked'}
  */
+const NEIGH = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, 1], [1, -1], [-1, -1]];
+
+/** Стрелок-поселенец отходит от бойца ближнего боя, а не стреляет в упор. @returns {boolean} отходит */
+function kite(game, C, p, w) {
+  const now = game.time.tick;
+  if (p._kiteUntil > now) return !!p.path;
+  let th = null;
+  let bd = 2.3 * 2.3;
+  for (const e of C.R.enemies) {
+    const d2 = (e.x - p.x) ** 2 + (e.y - p.y) ** 2;
+    if (d2 >= bd || weaponStats(game, C, e).kind !== 'melee' || e.stationary) continue;
+    bd = d2;
+    th = e;
+  }
+  if (!th) return false;
+  const a = Math.atan2(p.y - th.y, p.x - th.x);
+  const map = game.map;
+  for (const off of [0, 0.6, -0.6, 1.2, -1.2]) {
+    const x = Math.floor(p.x + Math.cos(a + off) * 3.5);
+    const y = Math.floor(p.y + Math.sin(a + off) * 3.5);
+    if (!map.isPassable(x, y)) continue;
+    if (moveTo(game, p, x, y)) {
+      p._kiteUntil = now + 45;
+      return true;
+    }
+  }
+  p._kiteUntil = now + 30;
+  void w;
+  return false;
+}
+
 export function engage(game, C, p, t, opts = {}) {
   const now = game.time.tick;
   const w = weaponStats(game, C, p);
+  if (w.kind === 'ranged' && !opts.hold && p.faction === 'colony' && t.kind === 'pawn' && kite(game, C, p, w)) return 'move';
   const c = center(t);
   const d = reachDist(p, t);
   const dmgMul = opts.dmgMul || p._dmgMul || 1;
@@ -223,6 +255,8 @@ function retreatTick(game, C, p) {
   const nearEdge = p.x < 3 || p.y < 3 || p.x > map.w - 3 || p.y > map.h - 3;
   if (nearEdge || (dist(p.x, p.y, ex.x + 0.5, ex.y + 0.5) < 1.2)) {
     if (nearEdge || game.time.tick - (p._leftAt || 0) > secs(30)) {
+      const raid = raidOf(C, p);
+      if (raid) raid.left = (raid.left || 0) + 1;
       game.jobs.endJob(p, 'cancelled');
       game.entities.remove(p, 'left');
       return 'failed';
@@ -428,7 +462,7 @@ function armsTick(game, C, p) {
   if (!L || L === p) return 'done';
   const w = weaponStats(game, C, p);
   // цель лидера (клик/наведение), иначе ближайший враг рядом с бойцом
-  let t = validTarget(game, p, C.R.leaderTargetId, false);
+  let t = validTarget(game, p, C.R.leaderTargetId, false) || validTarget(game, p, C.R.hoverEnemyId, false);
   if (t && (!isHostile(p, t) || dist(L.x, L.y, t.x, t.y) > 18)) t = null;
   if (!t) {
     t = validTarget(game, p, p._tgt, false);
@@ -447,14 +481,26 @@ function armsTick(game, C, p) {
   const ring = Math.floor(i / 6);
   const k = i % 6;
   const back = (L.dir || 0) + Math.PI;
-  const ang = back + (k - 2.5) * 0.5;
-  const rr = 1.8 + ring * 1.2;
+  // шаг в строю ≥ 1.3 клетки: хорда 2·r·sin(0.75/2) ≈ 1.32 при r = 1.8
+  const ang = back + (k - 2.5) * 0.75;
+  const rr = 1.8 + ring * 1.4;
   let fx = L.x + Math.cos(ang) * rr;
   let fy = L.y + Math.sin(ang) * rr;
   const map = game.map;
   if (!map.isPassable(Math.floor(fx), Math.floor(fy))) {
-    fx = L.x;
-    fy = L.y;
+    let found = false;
+    for (const [dx, dy] of NEIGH) {
+      if (map.isPassable(Math.floor(fx + dx), Math.floor(fy + dy))) {
+        fx += dx;
+        fy += dy;
+        found = true;
+        break;
+      }
+    }
+    if (!found) {
+      fx = L.x;
+      fy = L.y;
+    }
   }
   if (dist(p.x, p.y, fx, fy) > 1.4) approach(game, p, fx, fy, dist(fx, fy, L.x, L.y) < 0.6);
   else {
@@ -789,7 +835,8 @@ export function registerAI(game, C) {
     factions: ['colony'],
     evaluate(g, p) {
       if (!C.R.hostiles || p.drafted || p.isLeader || p.job?.type === 'combat:fight') return null;
-      if (!isArmed(g, p) || hpRatio(g, p) < 0.3 || g.api.mind.isInBreak(p)) return null;
+      // раненые (в т.ч. только что вставшие) в бой не лезут, пока не окрепнут
+      if (!isArmed(g, p) || hpRatio(g, p) < 0.6 || g.api.mind.isInBreak(p)) return null;
       // тревога (рейд у поезда) — вооружённые сходятся на врага издалека
       const t = nearestHostile(g, C, p, { maxD: C.R.alarm ? 30 : 12 });
       if (!t) return null;

@@ -258,7 +258,7 @@ export function updateRaids(game, C) {
       if (isActiveFoe(p)) members.push(p);
     }
     if (!members.length) {
-      endRaid(game, C, raid, raid.phase === 'retreat' || raid.phase === 'rob' ? 'left' : 'repelled');
+      endRaid(game, C, raid, (raid.left || 0) > 0 ? 'left' : 'repelled');
       continue;
     }
     const f = FACTIONS[raid.faction] || FACTIONS.bandits;
@@ -276,12 +276,21 @@ export function updateRaids(game, C) {
       const anyDowned = game.colonists().some((c) => c.downed && !raid.robbed.includes(c.id));
       if (!near(20) && (anyDowned || standing.length === 0 || raid.stealBudget !== 0)) {
         raid.phase = 'rob';
+        raid.robStart = tick;
         game.api.vision.report(game.t('combat.raid.robbing'), { type: 'bad', x: members[0].x, y: members[0].y });
       }
     } else if (raid.phase === 'rob') {
       if (near(20)) raid.phase = 'attack';
-      else if (raid.robDone) {
+      else if (raid.robDone || tick - (raid.robStart ?? tick) > secs(120)) {
         raid.phase = 'retreat';
+      }
+    }
+    // никого на ногах рядом — недолго бродят и уходят (бандиты — сперва грабят)
+    if (raid.kind !== 'boss' && raid.phase !== 'retreat' && raid.phase !== 'rob') {
+      if (near(30)) raid.quietSince = null;
+      else {
+        raid.quietSince ??= tick;
+        if (tick - raid.quietSince > secs(f.rob ? 90 : 45)) raid.phase = 'retreat';
       }
     }
     if (raid.phase !== 'retreat' && tick - raid.startTick > TICKS_PER_DAY && raid.kind !== 'boss') raid.phase = 'retreat';

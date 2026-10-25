@@ -12,6 +12,13 @@ import { secs } from './state.js';
 export const BOSS_IDS = ['bone_dragon', 'lich', 'rot_heart'];
 const ALIAS = { dragon: 'bone_dragon', bone: 'bone_dragon', puppeteer: 'lich', lich_puppeteer: 'lich', heart: 'rot_heart', rot: 'rot_heart', heart_of_rot: 'rot_heart' };
 
+/** Позвонок дракона (уязвимое место) — на основании хвоста, за спиной. */
+export const VERTEBRA_OFF = 1.6;
+export function dragonVertebra(p) {
+  const a = p.dir || 0;
+  return { x: p.x - Math.cos(a) * VERTEBRA_OFF, y: p.y - Math.sin(a) * VERTEBRA_OFF };
+}
+
 const phaseOf = (p) => {
   const r = (p.health?.hp ?? 1) / (p.health?.maxHp ?? 1);
   return r > 0.66 ? 1 : r > 0.33 ? 2 : 3;
@@ -55,14 +62,29 @@ export function installBosses(game, C) {
     return { id: raid.id, faction: 'boss', count: 1, pawnIds: [boss.id], kind: 'boss', bossId, pawnId: boss.id };
   };
 
+  /** Свободный снаряд долетел до открытого позвонка дракона? @returns {object|null} дракон */
+  C.vertebraHit = (x, y) => {
+    for (const e of C.R.enemies) {
+      if (e.boss?.id !== 'bone_dragon' || !(e.boss.weakUntil > game.time.tick)) continue;
+      const v = dragonVertebra(e);
+      if ((v.x - x) ** 2 + (v.y - y) ** 2 <= 0.7 * 0.7) return e;
+    }
+    return null;
+  };
   // ---------- Урон боссам и щиты ----------
   C.bossDamageMul = (target, opts) => {
     const b = target.boss;
     if (!b) return 1;
     let m = 1;
-    if (b.id === 'bone_dragon' && b.weakUntil > game.time.tick) m *= 3;
+    // светящийся позвонок: ×3 только по попаданию в него (точка удара/снаряда рядом с позвонком)
+    if (b.id === 'bone_dragon' && b.weakUntil > game.time.tick && Number.isFinite(opts?.hitX)) {
+      const v = dragonVertebra(target);
+      if (dist(opts.hitX, opts.hitY, v.x, v.y) <= 1.0) {
+        m *= 3;
+        C.vfx('spark', { x: v.x, y: v.y, a: 0, color: '#ffd27a' });
+      }
+    }
     if (b.slowUntil > game.time.tick) m *= 1.1;
-    void opts;
     return m;
   };
   /** Щит памяти: у поезда урон по поселенцам ниже, пока жив Сердце Гнили. */
@@ -223,7 +245,7 @@ function dragonTick(game, C, p, b, now, dt) {
       breathFire(game, C, p, b.breath);
       b.breath = null;
       b.weakUntil = now + secs(2);
-      b.breathAt = now + secs(b.phase === 3 ? 20 : 30);
+      b.breathAt = now + secs(b.phase === 3 ? 28 : 40);
     }
     return 'running';
   }
@@ -234,15 +256,15 @@ function dragonTick(game, C, p, b, now, dt) {
   }
   if (now >= b.breathAt && t) {
     const ang = Math.atan2(t.y - p.y, t.x - p.x);
-    b.breath = { x0: p.x, y0: p.y, ang, len: 15, fireAt: now + secs(1.3) };
+    b.breath = { x0: p.x, y0: p.y, ang, len: 14, fireAt: now + secs(1.6) };
     C.sfx('combat:roar', p.x, p.y);
     game.api.vision.noise(p.x, p.y, 25, 'roar');
     return 'running';
   }
   if (now >= b.summonAt) {
-    b.summonAt = now + secs(25);
-    if (countSummons(game, C, p, 'skeleton') + countSummons(game, C, p, 'skeleton_archer') < 6) {
-      summon(game, C, p, 'skeleton', 1 + b.phase, 3);
+    b.summonAt = now + secs(35);
+    if (countSummons(game, C, p, 'skeleton') + countSummons(game, C, p, 'skeleton_archer') < 4) {
+      summon(game, C, p, 'skeleton', b.phase, 3);
       if (b.phase >= 2) summon(game, C, p, 'skeleton_archer', 1, 3);
       game.api.vision.report(game.t('combat.boss.bone_dragon.summon'), { type: 'bad', x: p.x, y: p.y });
     }
@@ -266,8 +288,8 @@ function breathFire(game, C, p, br) {
   for (const o of C.R.colony) {
     if (o.dead) continue;
     if (distToSegment(o.x, o.y, br.x0, br.y0, x1, y1) <= 1.1) {
-      dealDamage(game, C, o, 28, { type: 'burn', part: pickPart(game), source: p, avg: 28, angle: br.ang, aoe: true });
-      if (!o.dead) o.burnUntil = Math.max(o.burnUntil || 0, now + secs(3));
+      dealDamage(game, C, o, 15, { type: 'burn', part: pickPart(game), source: p, avg: 15, angle: br.ang, aoe: true });
+      if (!o.dead) o.burnUntil = Math.max(o.burnUntil || 0, now + secs(2));
     }
   }
   const map = game.map;
@@ -473,9 +495,9 @@ export function autoStoryteller(game, C) {
   const rng = game.rng;
   const day = game.time.day;
   S.autoRaidN++;
-  const cap = 30 + game.colonists().filter((p) => !p.downed).length * 28;
-  const points = Math.min(cap, Math.round(25 + day * 6 + S.autoRaidN * 5));
+  const cap = 25 + game.colonists().filter((p) => !p.downed).length * 22;
+  const points = Math.min(cap, Math.round(20 + day * 4 + S.autoRaidN * 4));
   const faction = rng.pick(day < 4 ? ['bandits', 'rot_beasts'] : ['bandits', 'bandits', 'cultists', 'undead', 'rot_beasts']);
   C.spawnRaid({ points, faction, edge: rng.pick(['north', 'south', 'west', 'east']) });
-  S.autoRaidTick = now + Math.round(TICKS_PER_DAY * rng.range(2.6, 4.2));
+  S.autoRaidTick = now + Math.round(TICKS_PER_DAY * rng.range(4, 6));
 }

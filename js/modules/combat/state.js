@@ -7,7 +7,7 @@ export function createSaved() {
   return {
     raids: [], // [{id, faction, kind, pawnIds, initial, phase, startTick, points, robbed, stolen, stealBudget, robDone, kills, bossId}]
     nextRaidId: 1,
-    autoRaidTick: Math.round(TICKS_PER_DAY * 3.1), // запасной рассказчик (только без модуля journey)
+    autoRaidTick: Math.round(TICKS_PER_DAY * 5.1), // запасной рассказчик (только без модуля journey)
     autoRaidN: 0,
     stats: { raids: 0, kills: 0, bossesDefeated: [], executions: 0, recruited: 0 },
     threads: [], // нити Лича: [{lichId, pawnId, hp}]

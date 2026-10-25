@@ -247,7 +247,7 @@ export function meleeStrike(game, C, attacker, target, w, opts = {}) {
     crit = true;
   }
   learn(game, attacker, 'melee', 6);
-  return dealDamage(game, C, target, dmg, { type: w.type, part: pickPart(game), source: attacker, crit, avg, angle: attacker.dir });
+  return dealDamage(game, C, target, dmg, { type: w.type, part: pickPart(game), source: attacker, crit, avg, angle: attacker.dir, hitX: attacker.x, hitY: attacker.y });
 }
 
 /** Прицельный выстрел ИИ по цели (попадание решается в момент выстрела). */
@@ -338,7 +338,7 @@ function impactPawn(game, C, pr, t) {
     explode(game, C, t.x, t.y, pr.aoe, src);
     return;
   }
-  dealDamage(game, C, t, pr.dmg, { type: pr.type, part: pr.part, source: src, crit: pr.crit, avg: pr.avg, angle: pr.dir, ranged: true, spell: pr.spell });
+  dealDamage(game, C, t, pr.dmg, { type: pr.type, part: pr.part, source: src, crit: pr.crit, avg: pr.avg, angle: pr.dir, ranged: true, spell: pr.spell, hitX: pr.x, hitY: pr.y });
   if (pr.chill) applyChill(game, t, pr.chill.factor, pr.chill.seconds);
 }
 
@@ -410,6 +410,12 @@ export function updateProjectiles(game, C, dt) {
     }
     if (pr.mode === 'free') {
       const src = ents.get(pr.sourceId) || { faction: pr.faction, id: pr.sourceId };
+      const drg = pr.faction !== 'enemy' && C.vertebraHit?.(nx, ny);
+      if (drg) {
+        ents.remove(pr, 'hit');
+        impactPawn(game, C, pr, drg);
+        continue;
+      }
       C.R.qbuf2.length = 0;
       const near = ents.queryRadius(nx, ny, 0.6, 'pawn', null, C.R.qbuf2);
       let hitP = null;
@@ -452,7 +458,7 @@ export function explode(game, C, x, y, aoe, source) {
     if (mul <= 0) continue;
     const d = dist(x, y, p.x, p.y);
     const fall = 1 - 0.5 * clamp01(d / r);
-    dealDamage(game, C, p, aoe.dmg * fall * mul, { type: aoe.type || 'burn', part: pickPart(game), source, avg: aoe.dmg * 0.75, angle: Math.atan2(p.y - y, p.x - x), aoe: true, spell: aoe.spell });
+    dealDamage(game, C, p, aoe.dmg * fall * mul, { type: aoe.type || 'burn', part: pickPart(game), source, avg: aoe.dmg * 0.75, angle: Math.atan2(p.y - y, p.x - x), aoe: true, spell: aoe.spell, hitX: x, hitY: y });
     if (aoe.chill && !p.dead) applyChill(game, p, aoe.chill.factor, aoe.chill.seconds, aoe.chill.freeze);
     if (aoe.burn && !p.dead) p.burnUntil = Math.max(p.burnUntil || 0, now + secs(aoe.burn));
   }
@@ -559,7 +565,7 @@ export function dealDamage(game, C, target, amount, opts = {}) {
   let downNow = false;
   const hp0 = target.health?.hp ?? 100;
   if (isHealthStub(game) && !opts.lethal && !target.downed && !target.boss && !target.simpleHealth && hp0 - amt <= 0 && hp0 > 1.5 && game.rng.next() < (target.faction === 'colony' ? 0.85 : 0.7)) {
-    toApply = Math.max(0, hp0 - 1);
+    toApply = Math.max(0, hp0 - Math.min(hp0 - 0.5, (target.health?.maxHp ?? 100) * 0.12));
     downNow = true;
   }
   target._lastHitBy = src?.id || 0;
@@ -579,6 +585,11 @@ export function dealDamage(game, C, target, amount, opts = {}) {
     if (!opts.silent && !game.isHeadless) C.hitSparks(target.x, target.y, opts.angle ?? 0, type, target);
   }
   const killed = !!target.dead;
+  // упавший враг засчитывается как победа (опыт лидера, именное оружие) — добивать не обязательно
+  if (!killed && target.downed && !target.creditedTo && target.faction === 'enemy' && src?.kind === 'pawn' && src.faction === 'colony') {
+    target.creditedTo = src.id;
+    creditKill(game, C, src, target);
+  }
   C.juice(src, target, dealt, opts, killed);
   return dealt;
 }
@@ -608,7 +619,7 @@ export function destroyBuilding(game, C, b, source) {
   game.events.emit('combat:buildingDestroyed', { entity: b, source });
   C.vfx('explosion', { x: cx, y: cy, r: 1, color: '#ffb347' });
   if (!game.isHeadless) game.fx.preset('dust', cx, cy, { count: 16 });
-  C.R.burning.delete(b.id);
+  C.R.burningIds?.delete(b.id);
 }
 
 // ---------------- Убийства, трофеи, именное оружие ----------------
@@ -631,7 +642,9 @@ export function registerKillHandling(game, C) {
         const left = raid.pawnIds.some((id) => id !== pawn.id && isActiveFoe(game.entities.get(id)));
         if (!left && raid.kind !== 'boss' && game.settings.get('slowMo') !== false) game.slowMo(0.3, 600);
       }
-      if (src) creditKill(game, C, src, pawn);
+      if (pawn.creditedTo) {
+        /* уже засчитан при падении */
+      } else if (src) creditKill(game, C, src, pawn);
     }
     if (pawn.boss) C.onBossDied?.(pawn, corpse);
     // отражения Лича и щупальца не оставляют тел
@@ -679,7 +692,11 @@ function dropGearOnDeath(game, C, pawn, x, y) {
     if (pawn.faction !== 'enemy' || rng.chance(0.7)) put(eq.armor, 1, eq.armorMeta || { quality: 'normal' });
     eq.armor = null;
   }
-  for (const l of pawn.loot || []) if (game.defs.items.has(l.defId) && l.count > 0) {
+  for (const l of pawn.loot || []) if (l.virtual && l.count > 0 && Number.isFinite(game.colony.silver)) {
+    game.colony.silver += l.count; // украденное серебро без предмета — вернулось в казну
+    game.api.ui.notify(game.t('combat.rob.silverBack', { n: l.count }), { type: 'good', x, y });
+  }
+  for (const l of pawn.loot || []) if (!l.virtual && game.defs.items.has(l.defId) && l.count > 0) {
     if (game.defs.items.get(l.defId).stackLimit === 1) put(l.defId, 1, l.meta || { quality: l.quality || 'normal' });
     else put(l.defId, l.count, null);
   }
@@ -690,7 +707,7 @@ function dropGearOnDeath(game, C, pawn, x, y) {
 export function creditKill(game, C, killer, victim) {
   killer.kills = (killer.kills || 0) + 1;
   const ed = victim.enemyId && game.defs.enemies.get(victim.enemyId);
-  if (killer.isLeader && killer.faction === 'colony') C.grantXp?.(killer, ed?.xp ?? 10, 'kill');
+  if (killer.isLeader && killer.faction === 'colony') C.grantXp?.(killer, Math.round((ed?.xp ?? 10) * 1.8), 'kill');
   const eq = killer.equipment;
   const wid = eq?.weapon;
   if (!wid || killer.faction !== 'colony' || !game.defs.items.get(wid)?.weapon) return;
@@ -740,20 +757,34 @@ export function installJuice(game, C) {
     }
     C.shakePx(2 + 4 * k);
   };
+  /** Смещение для цифр урона одной цели: новые всплывают выше и вбок, а не поверх. */
+  const stack = (target) => {
+    const t = realNow();
+    const st = (C.R.floatStack ||= new Map());
+    let e = st.get(target.id);
+    if (!e || t - e.t > 450) e = { n: 0, t };
+    e.n = (e.n + 1) % 5;
+    e.t = t;
+    st.set(target.id, e);
+    if (st.size > 64) st.clear();
+    return { dx: (e.n % 2 ? 0.28 : -0.28) * Math.min(1, e.n), dy: -0.32 * e.n };
+  };
   C.damageNumber = (target, dmg, crit, src) => {
     if (game.settings.get('damageNumbers') === false) return;
     if (game.isHeadless) return;
     const color = target.faction === 'colony' ? '#ff6b7a' : crit ? '#ffd27a' : '#e8ecff';
     const text = `${Math.max(1, Math.round(dmg))}${crit ? '!' : ''}`;
-    game.api.av.floatText(target.x, target.y - 0.6, text, color);
-    if (!game.providers.av?.floatText) C.vfx('float', { x: target.x + (Math.random() - 0.5) * 0.3, y: target.y - 0.5, text, color, big: crit });
+    const o = stack(target);
+    game.api.av.floatText(target.x + o.dx, target.y - 0.6 + o.dy, text, color);
+    if (!game.providers.av?.floatText) C.vfx('float', { x: target.x + o.dx, y: target.y - 0.5 + o.dy, text, color, big: crit });
     void src;
   };
   C.floatMiss = (target) => {
     if (game.isHeadless || game.settings.get('damageNumbers') === false) return;
     const text = game.t('combat.ui.miss');
-    game.api.av.floatText(target.x, target.y - 0.6, text, '#8c93b8');
-    if (!game.providers.av?.floatText) C.vfx('float', { x: target.x, y: target.y - 0.5, text, color: '#8c93b8' });
+    const o = stack(target);
+    game.api.av.floatText(target.x + o.dx, target.y - 0.6 + o.dy, text, '#8c93b8');
+    if (!game.providers.av?.floatText) C.vfx('float', { x: target.x + o.dx, y: target.y - 0.5 + o.dy, text, color: '#8c93b8' });
   };
   C.floatText = (x, y, text, color = '#e8ecff') => {
     if (game.isHeadless) return;

@@ -87,8 +87,9 @@ export function register(game) {
           if (!L || L.downed) break;
           try {
             if (a.type === 'attack') {
-              if (a.targetId) C.R.leaderTargetId = a.targetId;
-              leaderAttack(g, C, L, a.x, a.y);
+              const tg = a.targetId ? g.entities.get(a.targetId) : null;
+              if (tg && !tg.downed) C.R.leaderTargetId = a.targetId;
+              leaderAttack(g, C, L, a.x, a.y, a.targetId);
             } else if (a.type === 'spell') castSlot(g, C, L, a.slot, a.x, a.y);
             else if (a.type === 'dash') leaderDash(g, C, L, a.x, a.y);
             else if (a.type === 'arms') callToArms(g, C, L);
@@ -143,9 +144,11 @@ export function register(game) {
       let hover = 0;
       if (m.inside) {
         let bd = 0.9 * 0.9;
-        for (const o of C.R.enemies) {
-          const d2 = (o.x - m.wx) ** 2 + (o.y - m.wy) ** 2;
-          if (d2 < bd && isHostile(L, o)) {
+        // упавших тоже можно навести (добить ЛКМ); стоящие — в приоритете
+        for (const o of g.entities.queryRadius(m.wx, m.wy, 0.9, 'pawn')) {
+          if (o.dead || o.faction !== 'enemy' || o.prisoner) continue;
+          const d2 = (o.x - m.wx) ** 2 + (o.y - m.wy) ** 2 + (o.downed ? 0.5 : 0);
+          if (d2 < bd && (o.downed || isHostile(L, o))) {
             bd = d2;
             hover = o.id;
           }
@@ -270,7 +273,12 @@ export function register(game) {
       refreshLists(game, C);
       if (typeof slotOrId === 'number') return castSlot(game, C, p, slotOrId, tx, ty);
       if (!SPELLS[slotOrId]) return false;
-      return castSpellId(game, C, p, slotOrId, tx, ty, activeSlots(game, p).power);
+      // те же ограничения, что у слотов: без посоха — только Искра, ученик — Искра и Лечение, иначе — известные
+      ensureLeader(game, C, p);
+      const sp = activeSlots(game, p);
+      const allowed = sp.mode === 'full' ? p.perks.known.includes(slotOrId) || sp.slots.includes(slotOrId) : sp.slots.includes(slotOrId);
+      if (!allowed) return false;
+      return castSpellId(game, C, p, slotOrId, tx, ty, sp.power);
     },
     getSpells: (p) => (p ? { ...activeSlots(game, p), known: (p.perks?.known || []).slice(), cooldowns: { ...(p.perks?.cd || {}) } } : null),
     callToArms(L) {
@@ -346,13 +354,18 @@ function stubHealth(game, C) {
     const h = p.health;
     if (!h) continue;
     const max = h.maxHp ?? 100;
-    if (p.faction === 'enemy' && p.downed && !p.prisoner) {
-      p._downedSince ??= now;
-      if (now - p._downedSince > TICKS_PER_HOUR * 10) game.api.health.kill(p, 'bleeding', {});
+    if (p.faction === 'enemy' && !p.prisoner) {
+      // враги не заживают; брошенные упавшие истекают кровью
+      if (p.downed) {
+        p._downedSince ??= now;
+        if (now - p._downedSince > TICKS_PER_HOUR * 10) game.api.health.kill(p, 'bleeding', {});
+      }
       continue;
     }
+    if (p.puppet) continue;
     // упавших кормят и укрывают товарищи (упрощение до появления health: спасение и лечение)
     if (p.downed && p.needs && 'food' in p.needs) p.needs.food = Math.max(p.needs.food, 0.3);
+    if (p.downed) h.hp = Math.max(h.hp ?? 0, max * 0.1); // не дать голоду добить лежачего
     const rate = p.downed ? 0.06 : 0.03;
     h.hp = Math.min(max, (h.hp ?? max) + max * rate);
     if (p.downed && h.hp >= max * 0.35) {

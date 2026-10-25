@@ -40,7 +40,7 @@ export const WEAPON_STATS = {
   bone_blade: { kind: 'melee', damage: 8, type: 'cut', reach: 1.5, cooldown: 1.1, accuracy: 0.8, skill: 'melee', metal: true },
   bone_bow: { kind: 'ranged', damage: 9, type: 'stab', range: 10, cooldown: 1.9, accuracy: 0.66, projectile: 'arrow', speed: 20, skill: 'shooting', sfx: 'combat:bow' },
   tendril: { kind: 'melee', damage: 9, type: 'blunt', reach: 2.6, cooldown: 1.3, accuracy: 0.8, skill: 'melee' },
-  dragon_bite: { kind: 'melee', damage: 25, type: 'cut', reach: 2.4, cooldown: 2.0, accuracy: 0.85, skill: 'melee' },
+  dragon_bite: { kind: 'melee', damage: 17, type: 'cut', reach: 2.4, cooldown: 2.0, accuracy: 0.85, skill: 'melee' },
   lich_bolt: { kind: 'ranged', damage: 14, type: 'rune', range: 13, cooldown: 1.8, accuracy: 0.8, projectile: 'curse', speed: 18, skill: 'magic' },
   clone_bolt: { kind: 'ranged', damage: 5, type: 'rune', range: 11, cooldown: 2.2, accuracy: 0.6, projectile: 'curse', speed: 16, skill: 'magic' },
   heart_lash: { kind: 'melee', damage: 16, type: 'blunt', reach: 3.2, cooldown: 2.4, accuracy: 0.8, skill: 'melee' },
