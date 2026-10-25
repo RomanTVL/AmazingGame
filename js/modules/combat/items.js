@@ -35,9 +35,9 @@ export const WEAPON_STATS = {
   conductor_staff: { kind: 'melee', damage: 9, type: 'blunt', reach: 1.9, cooldown: 0.55, accuracy: 0.9, skill: 'melee', mage: true, staff: true },
   // естественное оружие (не предметы)
   fists: { kind: 'melee', damage: 4, type: 'blunt', reach: 1.4, cooldown: 1.0, accuracy: 0.85, skill: 'melee' },
-  claws: { kind: 'melee', damage: 9, type: 'cut', reach: 1.5, cooldown: 0.9, accuracy: 0.85, skill: 'melee' },
-  bite: { kind: 'melee', damage: 10, type: 'bite', reach: 1.4, cooldown: 0.95, accuracy: 0.86, skill: 'melee' },
-  bone_blade: { kind: 'melee', damage: 10, type: 'cut', reach: 1.5, cooldown: 1.1, accuracy: 0.8, skill: 'melee', metal: true },
+  claws: { kind: 'melee', damage: 8, type: 'cut', reach: 1.5, cooldown: 0.9, accuracy: 0.85, skill: 'melee' },
+  bite: { kind: 'melee', damage: 9, type: 'bite', reach: 1.4, cooldown: 0.95, accuracy: 0.86, skill: 'melee' },
+  bone_blade: { kind: 'melee', damage: 8, type: 'cut', reach: 1.5, cooldown: 1.1, accuracy: 0.8, skill: 'melee', metal: true },
   bone_bow: { kind: 'ranged', damage: 9, type: 'stab', range: 10, cooldown: 1.9, accuracy: 0.66, projectile: 'arrow', speed: 20, skill: 'shooting', sfx: 'combat:bow' },
   tendril: { kind: 'melee', damage: 9, type: 'blunt', reach: 2.6, cooldown: 1.3, accuracy: 0.8, skill: 'melee' },
   dragon_bite: { kind: 'melee', damage: 25, type: 'cut', reach: 2.4, cooldown: 2.0, accuracy: 0.85, skill: 'melee' },

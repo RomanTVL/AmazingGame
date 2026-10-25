@@ -5,10 +5,14 @@ import { TICKS_PER_DAY } from '../../core/constants.js';
 /** Сохраняемое состояние. Всё — JSON. */
 export function createSaved() {
   return {
-    raids: [], // [{id, faction, kind, pawnIds, initial, phase, startTick, points, robbed, stolen, stealBudget, stealZoneId, robDone, bossId}]
+    raids: [], // [{id, faction, kind, pawnIds, initial, phase, startTick, points, robbed, stolen, stealBudget, robDone, kills, bossId}]
     nextRaidId: 1,
-    autoRaidTick: Math.round(TICKS_PER_DAY * 2.3), // запасной рассказчик (только без модуля journey)
-    stats: { raids: 0, kills: 0, bossesDefeated: [] },
+    autoRaidTick: Math.round(TICKS_PER_DAY * 3.1), // запасной рассказчик (только без модуля journey)
+    autoRaidN: 0,
+    stats: { raids: 0, kills: 0, bossesDefeated: [], executions: 0, recruited: 0 },
+    threads: [], // нити Лича: [{lichId, pawnId, hp}]
+    wards: [], // обереги вагонов: [{carId, untilTick}]
+    hornUntil: 0, // «к оружию» по гудку (тик, после которого можно отпустить, если тихо)
     calmTicks: 0,
   };
 }
@@ -23,11 +27,16 @@ export function createRuntime() {
     leaderTargetId: 0,
     lastHitStop: -1e9,
     tink: { n: 0, last: -1e9 },
-    turrets: new Set(),
-    traps: new Set(),
-    burning: new Set(),
-    faded: new Set(),
-    listsDirty: true,
+    colony: [], // живые поселенцы (кэш на тик)
+    enemies: [], // активные враги (кэш на тик)
+    hostiles: 0,
+    downedEnemies: 0,
+    prisoners: 0,
+    nameless: 0,
+    heartId: 0,
+    posts: new Map(), // пост у окна/двери (гудок): pawnId → {x, y}
+    prisonerSel: 0,
+    execConfirm: 0,
     qbuf: [],
     qbuf2: [],
   };

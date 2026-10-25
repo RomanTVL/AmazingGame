@@ -175,7 +175,7 @@ export function targetCover(game, shooter, target) {
 /** Шанс попадания дальнего выстрела. */
 export function hitChance(game, C, shooter, target, w, d, cover, trees = 0) {
   const lvl = skillLevel(game, shooter, w.skill || 'shooting');
-  let p = w.accuracy * (0.62 + lvl * 0.034) + weaponQuality(shooter).acc;
+  let p = w.accuracy * (0.68 + lvl * 0.032) + weaponQuality(shooter).acc;
   const rel = d / Math.max(1, w.range || 10);
   p *= 1 - 0.55 * rel * rel;
   p *= 1 - cover;
@@ -230,7 +230,7 @@ export function meleeStrike(game, C, attacker, target, w, opts = {}) {
   }
   const lvl = skillLevel(game, attacker, 'melee');
   const tl = skillLevel(game, target, 'melee');
-  let acc = w.accuracy * (0.7 + lvl * 0.025) + q.acc + (opts.accBonus || 0) - tl * 0.008;
+  let acc = w.accuracy * (0.76 + lvl * 0.024) + q.acc + (opts.accBonus || 0) - tl * 0.008;
   if (target.downed || target.frozenUntil > game.time.tick) acc += 0.4;
   const shake = game.api.health.aimShake?.(attacker);
   if (Number.isFinite(shake)) acc *= 1 - 0.25 * clamp01(shake);
@@ -402,7 +402,7 @@ export function updateProjectiles(game, C, dt) {
     pr.x = nx;
     pr.y = ny;
     ents.moved(pr);
-    if (pr.faction !== 'enemy' && C.hasThreads?.()) {
+    if (pr.faction !== 'enemy' && pr.mode === 'free' && C.hasThreads?.()) {
       if (C.hitThreadsAt(nx, ny, 0.5, pr.dmg, pr)) {
         ents.remove(pr, 'thread');
         continue;
@@ -410,7 +410,8 @@ export function updateProjectiles(game, C, dt) {
     }
     if (pr.mode === 'free') {
       const src = ents.get(pr.sourceId) || { faction: pr.faction, id: pr.sourceId };
-      const near = ents.queryRadius(nx, ny, 0.55, 'pawn', null, C.R.qbuf2.length = 0 ? C.R.qbuf2 : (C.R.qbuf2 = []));
+      C.R.qbuf2.length = 0;
+      const near = ents.queryRadius(nx, ny, 0.6, 'pawn', null, C.R.qbuf2);
       let hitP = null;
       for (const p of near) {
         if (p.id === pr.sourceId || p.dead || p.removed) continue;
@@ -425,7 +426,7 @@ export function updateProjectiles(game, C, dt) {
         continue;
       }
     }
-    if (pr.mode === 'aoe' && Math.hypot(pr.tx - nx, pr.ty - ny) <= step) {
+    if ((pr.mode === 'aoe' || pr.burstAt) && Math.hypot(pr.tx - nx, pr.ty - ny) <= step) {
       ents.remove(pr, 'burst');
       explode(game, C, pr.tx, pr.ty, pr.aoe, ents.get(pr.sourceId) || null);
       continue;
@@ -557,7 +558,7 @@ export function dealDamage(game, C, target, amount, opts = {}) {
   let toApply = amt;
   let downNow = false;
   const hp0 = target.health?.hp ?? 100;
-  if (isHealthStub(game) && !opts.lethal && !target.downed && !target.boss && !target.simpleHealth && hp0 - amt <= 0 && hp0 > 1.5 && game.rng.next() < 0.7) {
+  if (isHealthStub(game) && !opts.lethal && !target.downed && !target.boss && !target.simpleHealth && hp0 - amt <= 0 && hp0 > 1.5 && game.rng.next() < (target.faction === 'colony' ? 0.85 : 0.7)) {
     toApply = Math.max(0, hp0 - 1);
     downNow = true;
   }
