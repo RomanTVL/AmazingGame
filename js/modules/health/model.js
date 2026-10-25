@@ -473,7 +473,8 @@ export function damagePart(H, pawn, partId, amount, type, opts = {}, depth = 0) 
       H.hooks.notifyPart?.(pawn, partId, 'lost');
     }
     const overflow = amount - take;
-    if (overflow > 0.5 && P.parent && depth < 3 && !P.internal) {
+    // отсечённая часть улетает с ударом — урон дальше не идёт; иначе часть удара достаётся родителю
+    if (overflow > 0.5 && P.parent && depth < 3 && !P.internal && !P.sever) {
       const r = damagePart(H, pawn, P.parent, overflow * 0.6, type, opts, depth + 1);
       res.dealt += r.dealt;
     }
