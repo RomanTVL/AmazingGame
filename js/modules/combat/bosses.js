@@ -18,7 +18,6 @@ const phaseOf = (p) => {
 };
 
 export function installBosses(game, C) {
-  const S = C.S;
 
   /** Призвать босса. @returns {{id, faction, count, pawnIds, kind, bossId}|null} */
   C.spawnBoss = (id, opts = {}) => {
@@ -44,8 +43,8 @@ export function installBosses(game, C) {
     raid.pawnIds.push(boss.id);
     raid.bossId = boss.id;
     raid.initial = 1;
-    S.raids.push(raid);
-    S.stats.raids++;
+    C.S.raids.push(raid);
+    C.S.stats.raids++;
     if (bossId === 'rot_heart') C.R.heartId = boss.id;
     if (bossId === 'lich') raiseUnburied(game, C, boss, raid);
     game.api.vision.report(game.t(`combat.boss.${bossId}.arrive`), { type: 'danger', x: spot.x, y: spot.y });
@@ -76,7 +75,7 @@ export function installBosses(game, C) {
   };
 
   // ---------- Нити Лича ----------
-  C.hasThreads = () => S.threads.length > 0;
+  C.hasThreads = () => C.S.threads.length > 0;
   const threadMid = (t) => {
     const a = game.entities.get(t.lichId);
     const b = game.entities.get(t.pawnId);
@@ -85,8 +84,8 @@ export function installBosses(game, C) {
   };
   C.threadMid = threadMid;
   C.cutThread = (t, reason = 'cut') => {
-    const i = S.threads.indexOf(t);
-    if (i >= 0) S.threads.splice(i, 1);
+    const i = C.S.threads.indexOf(t);
+    if (i >= 0) C.S.threads.splice(i, 1);
     const p = game.entities.get(t.pawnId);
     if (p) {
       p.puppet = null;
@@ -100,7 +99,7 @@ export function installBosses(game, C) {
   };
   C.hitThreadsAt = (x, y, r, dmg) => {
     let hit = false;
-    for (const t of S.threads.slice()) {
+    for (const t of C.S.threads.slice()) {
       const m = threadMid(t);
       if (!m || dist(m.x, m.y, x, y) > r + 0.7) continue;
       t.hp -= dmg;
@@ -113,7 +112,7 @@ export function installBosses(game, C) {
   /** Голос лидера (R / Окрик) рвёт нити в радиусе. @returns {number} */
   C.voiceCleanse = (L, r) => {
     let n = 0;
-    for (const t of S.threads.slice()) {
+    for (const t of C.S.threads.slice()) {
       const p = game.entities.get(t.pawnId);
       if (p && dist(p.x, p.y, L.x, L.y) <= r) {
         C.cutThread(t, 'voice');
@@ -146,7 +145,7 @@ export function installBosses(game, C) {
       else m.leaving = true;
     }
     if (id === 'lich') {
-      for (const t of S.threads.slice()) C.cutThread(t, 'lichDied');
+      for (const t of C.S.threads.slice()) C.cutThread(t, 'lichDied');
       for (const bid of pawn.boss.cursed || []) {
         const b = game.entities.get(bid);
         if (b) b.cursedUntil = 0;
@@ -160,7 +159,7 @@ export function installBosses(game, C) {
       C.R.heartId = 0;
       for (const p of C.R.colony) if (p.nameless) p.nameless = false;
     }
-    if (!S.stats.bossesDefeated.includes(id)) S.stats.bossesDefeated.push(id);
+    if (!C.S.stats.bossesDefeated.includes(id)) C.S.stats.bossesDefeated.push(id);
     game.api.ui.notify(game.t(`combat.boss.${id}.defeated`), { type: 'good' });
     game.events.emit('boss:defeated', { id, pawn, corpse: corpse || null });
     if (game.settings.get('slowMo') !== false) game.slowMo(0.25, 900);

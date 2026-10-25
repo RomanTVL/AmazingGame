@@ -146,7 +146,7 @@ export function installPrison(game, C) {
       return null;
     },
     makeToils: (g, w, job) => [
-      { type: 'goto', targetId: job.targetId, adjacent: true },
+      { type: 'goto', x: job.x, y: job.y, adjacent: true },
       {
         type: 'work',
         ticks: 240,

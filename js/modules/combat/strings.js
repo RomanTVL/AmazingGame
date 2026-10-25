@@ -19,6 +19,7 @@ const ru = {
     dir: { north: 'с севера', south: 'с юга', west: 'с запада', east: 'с востока', around: 'со всех сторон', custom: '', none: '' },
     raid: {
       started: '{faction} идут {dir}: {n}.',
+      startedNear: '{faction} нападают: {n}.',
       ambush: 'Засада! {faction} окружают поезд: {n}.',
       broken: {
         bandits: 'Разбойники дрогнули и бегут.',
@@ -177,6 +178,7 @@ const en = {
     dir: { north: 'from the north', south: 'from the south', west: 'from the west', east: 'from the east', around: 'from all sides', custom: '', none: '' },
     raid: {
       started: '{faction} approach {dir}: {n}.',
+      startedNear: '{faction} attack: {n}.',
       ambush: 'Ambush! {faction} surround the train: {n}.',
       broken: { bandits: 'The bandits break and run.', cultists: 'The cultists fall back, muttering curses.', undead: 'The undead know no fear.', rot_beasts: 'The rot beasts slink back into the woods.', boss: '' },
       robbing: 'Bandits are robbing the fallen and raiding the storage.',

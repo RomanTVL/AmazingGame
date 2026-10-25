@@ -218,7 +218,9 @@ export function spawnRaid(game, C, a, b, c) {
   const dirKey = entry ? `combat.dir.${entry.edge}` : 'combat.dir.around';
   const text = opts.ambushTrain
     ? game.t('combat.raid.ambush', { faction: fname, n: raid.initial })
-    : game.t('combat.raid.started', { faction: fname, n: raid.initial, dir: game.i18n.has(dirKey) ? game.t(dirKey) : '' });
+    : game.i18n.has(dirKey) && game.t(dirKey)
+      ? game.t('combat.raid.started', { faction: fname, n: raid.initial, dir: game.t(dirKey) })
+      : game.t('combat.raid.startedNear', { faction: fname, n: raid.initial });
   game.api.vision.report(text, { type: 'danger', x: fx, y: fy });
   game.events.emit('combat:raidStarted', { raidId: raid.id, raid, faction, count: raid.initial, kind: raid.kind });
   return { id: raid.id, faction, count: raid.initial, pawnIds: raid.pawnIds.slice(), kind: raid.kind };

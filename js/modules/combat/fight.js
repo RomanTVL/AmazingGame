@@ -633,6 +633,9 @@ export function registerKillHandling(game, C) {
       }
       if (src) creditKill(game, C, src, pawn);
     }
+    if (pawn.boss) C.onBossDied?.(pawn, corpse);
+    // отражения Лича и щупальца не оставляют тел
+    if (corpse && !corpse.removed && (pawn.enemyId === 'lich_clone' || pawn.enemyId === 'rot_tendril')) game.entities.remove(corpse, 'vanished');
     if (pawn.prisoner) C.freePrisonerBed?.(pawn);
     if (pawn.puppet) pawn.puppet = null;
     pawn.drafted = false;
@@ -707,7 +710,6 @@ export function creditKill(game, C, killer, victim) {
 
 // ---------------- Сочность удара ----------------
 export function installJuice(game, C) {
-  const R = C.R;
   C.shakePx = (px) => {
     if (game.settings.get('shake') === false) return;
     const zoom = game.camera?.zoom || 1.25;
@@ -722,15 +724,15 @@ export function installJuice(game, C) {
     if (!(involves || crit || killed) || !(dmg > 0)) return;
     const k = clamp01(dmg / 40);
     const t = realNow();
-    if (game.settings.get('hitStop') !== false && t - R.lastHitStop >= 150) {
-      R.lastHitStop = t;
+    if (game.settings.get('hitStop') !== false && t - C.R.lastHitStop >= 150) {
+      C.R.lastHitStop = t;
       game.api.av.hitStop(Math.round(50 + 30 * k));
     }
     const fl = game.settings.get('flashes');
     if (fl !== false && fl !== 'off') {
       const ms = fl === 'reduced' ? 40 : 80;
       game.api.av.flash(target, ms);
-      if (!game.providers.av?.flash) target._flashUntil = R.clock + ms / 1000;
+      if (!game.providers.av?.flash) target._flashUntil = C.R.clock + ms / 1000;
     }
     if (!game.isHeadless) {
       const preset = game.defs.fxPresets.has('hit_sparks') ? 'hit_sparks' : 'combat:hit_sparks';
@@ -769,9 +771,9 @@ export function installJuice(game, C) {
   };
   C.playTink = () => {
     const t = realNow();
-    if (t - R.tink.last > 1000) R.tink.n = 0;
-    R.tink.last = t;
-    const pitch = 1 + Math.min(12, R.tink.n++) * 0.09;
+    if (t - C.R.tink.last > 1000) C.R.tink.n = 0;
+    C.R.tink.last = t;
+    const pitch = 1 + Math.min(12, C.R.tink.n++) * 0.09;
     const id = game.defs.sfx.has('loot_tink') ? 'loot_tink' : 'combat:loot_tink';
     game.api.av.play(id, { pitch });
   };
