@@ -145,9 +145,60 @@ try {
       game.api.combat.debugState().S.raids.length = 0;
       game.api.combat.spawnBoss(bid, { x: L.x + 7, y: L.y - 2 });
     }, id);
-    await wait(id === 'bone_dragon' ? 4500 : 2500);
+    await wait(1500);
+    if (id === 'bone_dragon') {
+      await g(() => {
+        const game = window.__game;
+        const L = game.getLeader();
+        const d = game.entities.listKind('pawn').find((p) => p.boss?.id === 'bone_dragon');
+        d.boss.breath = { x0: d.x, y0: d.y, ang: Math.atan2(L.y - d.y, L.x - d.x), len: 15, fireAt: game.time.tick + 120 };
+      });
+      await wait(800);
+      await shot('09-boss-dragon-telegraph');
+      await wait(1400);
+    }
+    if (id === 'lich') {
+      await g(() => {
+        const game = window.__game;
+        const L = game.getLeader();
+        const v = game.colonists().find((p) => !p.isLeader && !p.downed);
+        if (v) {
+          v.mood.value = 0.1;
+          v.drafted = false;
+          v.x = L.x + 4;
+          v.y = L.y + 3;
+          game.entities.moved(v);
+        }
+        const lich = game.entities.listKind('pawn').find((p) => p.boss?.id === 'lich');
+        lich.boss.threadAt = game.time.tick;
+      });
+      await wait(1200);
+    }
     await shot(`09-boss-${id}`);
   }
+  // все фракции + оборона, ускоренно
+  await g(() => {
+    const game = window.__game;
+    const L = game.getLeader();
+    for (const p of game.entities.listKind('pawn')) if (p.faction === 'enemy') game.entities.remove(p, 'test');
+    game.api.combat.debugState().S.raids.length = 0;
+    const near = (defId, dx, dy) => {
+      const s2 = game.map.randomPassableNear(game.rng, L.x + dx, L.y + dy, 4, 40, (x, y) => game.api.build.canPlace(defId, x, y));
+      return s2 ? game.api.build.place(defId, s2.x, s2.y) : null;
+    };
+    const t = near('rune_turret', 3, 3);
+    if (t) t.ammo = 40;
+    near('spike_trap', 6, 2);
+    near('fire_trap', 6, 4);
+    game.api.combat.spawnRaid({ faction: 'cultists', points: 80, x: L.x + 12, y: L.y + 4 });
+    game.api.combat.spawnRaid({ faction: 'undead', points: 70, x: L.x - 12, y: L.y + 5 });
+    game.api.combat.spawnRaid({ faction: 'rot_beasts', points: 60, x: L.x + 4, y: L.y + 12 });
+    game.events.emit('journey:horn', { pattern: 'double' });
+    game.setSpeed(3);
+  });
+  await wait(5000);
+  await shot('10-mixed');
+  await g(() => window.__game.setSpeed(1));
   const errs = await g(() => window.__game.errors.map((e) => `${e.where}: ${e.message}`));
   for (const e of errs) problems.push(`game.error ${e}`);
 } catch (err) {

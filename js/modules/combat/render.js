@@ -299,7 +299,7 @@ function drawDragon(ctx, p, game, view) {
   const dir = p.dir || 0;
   const t = view.time;
   const flap = Math.sin(t * 3.2) * 0.35;
-  const S = 1.4;
+  const S = 1.9;
   ctx.fillStyle = 'rgba(0,0,0,0.3)';
   ctx.beginPath();
   ctx.ellipse(x, y + 26, 36, 10, 0, 0, TAU);
@@ -313,7 +313,7 @@ function drawDragon(ctx, p, game, view) {
   ctx.lineJoin = 'round';
   // крылья — костяные «пальцы» с перепонкой
   for (const s of [-1, 1]) {
-    ctx.fillStyle = rgba('#9fb8ff', 0.18);
+    ctx.fillStyle = rgba('#7a6cff', 0.3);
     ctx.beginPath();
     ctx.moveTo(-2, 0);
     const wa = s * (1.2 + flap);
@@ -1214,7 +1214,7 @@ function registerHud(game, C) {
           if (mode === 'full' && ui2.clicked(sx, sy, S, S)) cycleSlot(g, L, i);
         }
       }
-      if (mode !== 'full') ui2.text(g.t(mode === 'nostaff' ? 'combat.hud.noStaff' : 'combat.hud.apprentice'), box.x, y0 - 14, { size: 11, align: 'center', color: '#ffb347' });
+      if (mode !== 'full') ui2.text(g.t(mode === 'nostaff' ? 'combat.hud.noStaff' : 'combat.hud.apprentice'), box.x, y0 + 14, { size: 9, align: 'center', color: '#ffb347' });
       // новый уровень — кнопка карточек
       if (pk.cards?.length) {
         const bw = 180;
@@ -1233,6 +1233,7 @@ function registerHud(game, C) {
     draw(ctx, g, ui2, box) {
       const parts = [];
       for (const r of C.S.raids) {
+        if (r.kind === 'boss') continue; // у босса — своя полоса с именем
         let alive = 0;
         for (const id of r.pawnIds) {
           const p = g.entities.get(id);

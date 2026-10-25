@@ -14,6 +14,14 @@
  *          'combat:levelUp' {pawn, level}, 'combat:weaponNamed' {item, name, pawn, defId}, 'boss:defeated' {id, pawn},
  *          'combat:drafted', 'combat:callToArms', 'combat:captured', 'combat:recruited', 'combat:prisonerExecuted',
  *          'combat:fire', 'combat:faded', 'combat:threadAttached/Cut', 'combat:nameless', 'combat:bossSpawned'.
+ * API (game.api.combat): контракт — isHostile, isDrafted, setDrafted(p, v, mode?), attack, spawnRaid (обе формы:
+ *   (points, factionId, {edge, ambushTrain, x, y}) и ({faction, points, kind, edge, ambushTrain, units})), getMana, hasStaff;
+ *   добавлено — spawnBoss(id, opts), spendMana(p, n), castSpell(p, slot|spellId, x, y), getSpells(p), callToArms(L),
+ *   hornToArms(), getLevel(p), grantXp(p, n), chooseUpgrade(p, idx|id), capture(p, by), canCapture(p),
+ *   setPrisonerMode(p, 'hold'|'recruit'|'release'|'execute'), equip(p, item), weaponOf(p), isArmed(p), isRaidActive(),
+ *   getRaids(), ignite(building), damage(target, amount, opts), callByName(L, p), getStats(), debugState().
+ * ПЕРКИ лидера (pawn.perks, читают другие модули): fuelMul (journey/train), camRadius (vision), voiceMul (vision),
+ *   obeyBonus (mind); level, xp, known, slots, upgrades, cd, pending, cards.
  */
 import { TICKS_PER_HOUR } from '../../core/constants.js';
 import { dist } from '../../core/math.js';
