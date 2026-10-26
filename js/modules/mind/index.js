@@ -16,7 +16,7 @@ import { createContext } from './core/ctx.js';
 import { registerDefs } from './core/defs.js';
 import { registerNeeds } from './core/needs.js';
 import { registerSocial, line, converse } from './core/social.js';
-import { registerBreaks, isInBreak, startBreak, endBreak } from './core/breaks.js';
+import { registerBreaks, isInBreak, startBreak, endBreak, thresholds } from './core/breaks.js';
 import { pawnOverlay } from './core/render.js';
 import { touchFurniture } from './core/env.js';
 import { addThought, removeThought, registerThought, getMood, thoughtList, computeSitu, updateMood } from './core/mood.js';
@@ -25,7 +25,7 @@ import { learn, skillLevel, skillFactor, getSkill } from './core/skills.js';
 import { ensurePawn, generateCandidate, getBio, lastWords } from './core/bio.js';
 import { setRelation, changeOpinion, partnerOf, seedRelations, relationList } from './core/relations.js';
 import { firstName, num, isColonistPawn } from './core/util.js';
-import { NEED_IDS, MOOD } from './constants.js';
+import { NEED_IDS, MOOD, H } from './constants.js';
 
 /** Нужды MVP, которые показываем в карточке. */
 const SHEET_NEEDS = ['food', 'rest', 'joy', 'comfort', 'social'];
@@ -108,8 +108,8 @@ function buildApi(M) {
         age: pawn.age,
         mood: Math.round(getMood(pawn) * 100),
         moodTarget: Math.round(num(pawn.mood?.target, getMood(pawn)) * 100),
-        breakAt: Math.round(MOOD.minor * 100),
-        inBreak: b ? { kind: b.kind, label: game.t(`mind.break.${b.kind}`), hoursLeft: Math.max(0, Math.round((b.until - game.time.tick) / 600)) } : null,
+        breakAt: Math.round((thresholds(M, pawn)?.minor ?? MOOD.minor) * 100),
+        inBreak: b ? { kind: b.kind, label: game.t(`mind.break.${b.kind}`), hoursLeft: Math.max(0, Math.round((b.until - game.time.tick) / H)) } : null,
         needs,
         thoughts: thoughtList(M, pawn),
         traits,
