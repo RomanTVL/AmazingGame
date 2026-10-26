@@ -74,7 +74,7 @@ function pickTopic(M, a, b, rng) {
  */
 export function converse(M, a, b, opts = {}) {
   const game = M.game;
-  const rng = game.rng;
+  const rng = M.rng();
   const now = game.time.tick;
   const ea = traitEffects(M, a);
   const op = opinionOf(a, b);
@@ -248,7 +248,7 @@ function findWindowSpot(M, pawn, rng) {
 /** Задача отдыха: посидеть / постоять у окна / прогуляться. */
 export function makeJoyJob(M, pawn) {
   const game = M.game;
-  const rng = game.rng;
+  const rng = M.rng();
   const eff = traitEffects(M, pawn);
   const opts = [];
   const seat = findSeatFor(M, pawn);
@@ -419,7 +419,7 @@ export function registerSocial(M) {
     factions: ['colony'],
     evaluate(g, pawn) {
       if (blocked(pawn)) return null;
-      if (num(pawn.needs?.joy, 1) > 0.85) return null;
+      if (num(pawn.needs?.joy, 1) > 0.5) return null;
       return makeJoyJob(M, pawn);
     },
   }, 'mind');
@@ -453,7 +453,7 @@ export function registerSocial(M) {
         if (!isAiColonist(a) || !canChat(M, a) || talking(M, a)) continue;
         if (a.job?.type === 'mind_talk') continue;
         const need = num(a.needs?.social, 0.6);
-        if (!g.rng.chance(SOCIAL.baseChance * (1.3 - need))) continue;
+        if (!M.rng().chance(SOCIAL.baseChance * (1.3 - need))) continue;
         let b = null;
         let bd = SOCIAL.talkRange * SOCIAL.talkRange;
         for (const o of list) {

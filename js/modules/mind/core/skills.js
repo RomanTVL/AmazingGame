@@ -97,8 +97,8 @@ export function getSkill(M, pawn, skillId) {
     next: SKILL.xpFor(level),
     passion,
     incapable,
-    /** множитель эффекта навыка: 0.75 при 0 … 1 при 5 … 1.75 при 20 */
-    factor: incapable ? 0.5 : 0.75 + 0.05 * level,
+    /** множитель эффекта навыка: 1 до уровня 3 (без штрафа новичкам) … 1.68 при 20 */
+    factor: incapable ? 0.5 : 1 + 0.04 * Math.max(0, level - 3),
     /** качество 0..1 (для готовки/ремесла/лечения) */
     quality: Math.max(0, Math.min(1, level / 20)),
   };

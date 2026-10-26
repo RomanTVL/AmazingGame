@@ -31,7 +31,7 @@ function canBreak(M, p) {
 export function startBreak(M, p, tier = 'minor', kind = null) {
   const game = M.game;
   if (!p || p.dead || p.mindBreak) return null;
-  const rng = game.rng;
+  const rng = M.rng();
   if (!kind || !BREAKS[kind]) {
     const eff = traitEffects(M, p);
     const cand = Object.entries(BREAKS).filter(([, d]) => d.tiers.includes(tier));
@@ -102,7 +102,7 @@ function hideSpot(M, p) {
         }
       }
   }
-  return best || game.map.randomPassableNear(game.rng, p.x, p.y, 10, 12, (x, y) => game.pathfinder.canReach(p.x, p.y, x, y));
+  return best || game.map.randomPassableNear(M.rng(), p.x, p.y, 10, 12, (x, y) => game.pathfinder.canReach(p.x, p.y, x, y));
 }
 
 /** Задача срыва: один «цикл» (узел выдаёт новый, пока срыв не кончится). */
@@ -117,9 +117,9 @@ function makeBreakJob(M, p) {
     if (!s) return game.jobs.createJob('mind_break', p, { x: Math.floor(p.x), y: Math.floor(p.y), data: { kind, ticks: 600 } });
     return game.jobs.createJob('mind_break', p, { x: s.x, y: s.y, data: { kind, sx: s.x, sy: s.y, ticks: 900 } });
   }
-  const s = game.map.randomPassableNear(game.rng, p.x, p.y, 9, 14, (x, y) => !game.map.buildingAt(x, y) && game.pathfinder.canReach(p.x, p.y, x, y));
+  const s = game.map.randomPassableNear(M.rng(), p.x, p.y, 9, 14, (x, y) => !game.map.buildingAt(x, y) && game.pathfinder.canReach(p.x, p.y, x, y));
   if (!s) return game.jobs.createJob('mind_break', p, { x: Math.floor(p.x), y: Math.floor(p.y), data: { kind, ticks: 300 } });
-  return game.jobs.createJob('mind_break', p, { x: s.x, y: s.y, data: { kind, sx: s.x, sy: s.y, ticks: 200 + game.rng.int(0, 200) } });
+  return game.jobs.createJob('mind_break', p, { x: s.x, y: s.y, data: { kind, sx: s.x, sy: s.y, ticks: 200 + M.rng().int(0, 200) } });
 }
 
 export function registerBreaks(M) {
@@ -174,7 +174,7 @@ export function registerBreaks(M) {
         const tier = mood < th.extreme ? 'extreme' : mood < th.major ? 'major' : mood < th.minor ? 'minor' : null;
         if (!tier) continue;
         const chance = CHECK / (MOOD.mtbHours[tier] * H);
-        if (g.rng.chance(chance)) startBreak(M, p, tier);
+        if (M.rng().chance(chance)) startBreak(M, p, tier);
       }
     },
   }, 'mind');

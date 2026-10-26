@@ -55,6 +55,11 @@ export function createContext(game) {
     reset() {
       M.R = freshRuntime();
     },
+    /** Собственный поток случайности mind (не сдвигает game.rng других модулей); состояние — в сейве (сериализатор mind). */
+    rng() {
+      if (!M.R.rng) M.R.rng = game.rng.fork('mind:stream');
+      return M.R.rng;
+    },
     now: () => game.time.tick,
     colonists: () => colonists(game, []),
   };

@@ -53,11 +53,11 @@ export const SKILL = {
 
 export const SOCIAL = {
   /** как часто (тиков) пешка «оглядывается» в поисках собеседника */
-  checkEvery: 45,
+  checkEvery: 75,
   /** радиус мгновенного разговора (клетки) */
   talkRange: 2.6,
   /** базовый шанс начать разговор за проверку (умножается на нужду в общении) */
-  baseChance: 0.09,
+  baseChance: 0.12,
   friendAt: 30,
   rivalAt: -30,
   ticks: { chat: 300, joke: 300, deep: 540, argue: 360, comfort: 420, insult: 240, romance: 420, toast: 240 },
