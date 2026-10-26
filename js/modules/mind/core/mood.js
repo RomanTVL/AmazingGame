@@ -1,7 +1,7 @@
 // Мысли и настроение: память (pawn.thoughts — JSON), ситуативные мысли (pawn._situ — пересчитываются),
 // множители черт, расчёт целевого настроения и плавное приближение к нему.
 import { H, DAY, MOOD, NEEDS } from '../constants.js';
-import { clamp01, num, isTravelling, isRoofed } from './util.js';
+import { clamp01, num, isTravelling } from './util.js';
 import { traitEffects, hasTrait } from './traits.js';
 
 const MAX_THOUGHTS = 60;
@@ -181,14 +181,6 @@ export function computeSitu(M, p) {
   else if (joy < 0.25) situ(out, 'bored', md('bored'));
   if (num(n.social, 1) < 0.15) situ(out, 'lonely', md('lonely'));
   if (num(n.comfort, 1) < 0.22 && eff.comfortNeed > 0) situ(out, 'uncomfortable', md('uncomfortable') * eff.comfortNeed);
-  const beauty = num(n.beauty, 0.5);
-  if (beauty < 0.28 && eff.beautyNeed > 0) situ(out, 'ugly_env', md('ugly_env') * eff.beautyNeed);
-  else if (beauty > 0.75 && eff.beautyNeed > 0) situ(out, 'pretty_env', md('pretty_env') * Math.min(1.5, eff.beautyNeed));
-  const warm = num(n.warmth, 1);
-  if (warm < 0.12) situ(out, 'freezing', md('freezing'));
-  else if (warm < 0.35) situ(out, 'cold', md('cold'));
-  else if (num(p._temp, 15) > NEEDS.tempComfortHigh + 7) situ(out, 'hot', md('hot'));
-  if (num(n.outdoors, 1) < 0.12) situ(out, 'cabin_fever', md('cabin_fever'));
   // черты с постоянным настроением
   for (const tid of p.traits || []) {
     const td = game.defs.traits.get(tid);
@@ -198,14 +190,12 @@ export function computeSitu(M, p) {
   const travelling = M.R._travelling;
   if (hasTrait(M, p, 'motion_sick')) situ(out, travelling ? 'motion_sick' : 'solid_ground', md(travelling ? 'motion_sick' : 'solid_ground'));
   if (travelling && p.pose === 'window' && hasTrait(M, p, 'sleeper_counter')) situ(out, 'counting_sleepers', md('counting_sleepers') * eff.smallJoyMul);
-  if (M.R._raining && isRoofed(game, p.x, p.y)) situ(out, 'rain_on_roof', md('rain_on_roof') * eff.smallJoyMul);
   if (p.inspiration && p.inspiration.until > game.time.tick) situ(out, 'inspired', 4);
   if (!p.isLeader && game.getLeader()) {
     const a = num(game.colony.authority, 50);
     if (a < 25) situ(out, 'weak_leader', md('weak_leader'));
     else if (a > 75) situ(out, 'strong_leader', md('strong_leader'));
   }
-  if (p._corpseNear) situ(out, 'corpse_near', md('corpse_near'));
   return out;
 }
 

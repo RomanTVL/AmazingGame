@@ -56,7 +56,7 @@ export function createContext(game) {
       M.R = freshRuntime();
     },
     now: () => game.time.tick,
-    colonists: () => colonists(game, M.R.colonists),
+    colonists: () => colonists(game, []),
   };
   return M;
 }

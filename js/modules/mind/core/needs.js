@@ -4,36 +4,23 @@ import { EVENTS } from '../../../core/events.js';
 import { resKey } from '../../../sim/jobs.js';
 import { makeEatJob, makeSleepJob } from '../../../sim/needs.js';
 import { H, DAY, NEEDS, MOOD } from '../constants.js';
-import { clamp01, num, isRoofed, isAiColonist, firstName, safeCall } from './util.js';
+import { clamp01, num, isAiColonist, firstName, safeCall } from './util.js';
 import { traitEffects } from './traits.js';
 import { ensurePawn } from './bio.js';
 import { computeSitu, updateMood, purgeThoughts } from './mood.js';
-import { furniture, temperatureAt, warmthTarget, beautyAt, comfortTarget, corpseNear, distToBuilding } from './env.js';
+import { furniture, comfortTarget, distToBuilding } from './env.js';
 import { driftOpinions, isLovers, kindOf } from './relations.js';
 
 const approach = (v, target, ratePerHour, ticks) => v + (target - v) * (1 - Math.exp((-ratePerHour * ticks) / H));
 
-/** Обновить потребности и окружение одной пешки (каждые 30 тиков; env — каждые 120). */
-function slowNeeds(M, p, ticks, env) {
-  const game = M.game;
+/** Медленные потребности одной пешки (каждые 30 тиков): отдых (joy), общение, комфорт. */
+function slowNeeds(M, p, ticks) {
   const n = p.needs;
   const eff = traitEffects(M, p);
-  const awake = !p.asleep;
-  if (awake) {
-    n.joy = clamp01(num(n.joy, 0.7) - (0.9 / DAY) * eff.joyDecay * ticks);
-    n.social = clamp01(num(n.social, 0.7) - (0.8 / DAY) * ticks);
+  if (!p.asleep) {
+    n.joy = clamp01(num(n.joy, 0.7) - (NEEDS.joyPerDay / DAY) * eff.joyDecay * ticks);
+    n.social = clamp01(num(n.social, 0.7) - (NEEDS.socialPerDay / DAY) * ticks);
   }
-  const roofed = isRoofed(game, p.x, p.y);
-  if (roofed) n.outdoors = clamp01(num(n.outdoors, 0.7) - (NEEDS.outdoorsPerDayInside / DAY) * ticks);
-  else n.outdoors = clamp01(num(n.outdoors, 0.7) + (NEEDS.outdoorsPerHourOutside / H) * ticks);
-  if (env) {
-    const temp = temperatureAt(M, p.x, p.y);
-    p._temp = Math.round(temp * 10) / 10;
-    p._beautyT = beautyAt(M, p.x, p.y);
-    p._corpseNear = corpseNear(M, p.x, p.y);
-  }
-  n.warmth = clamp01(approach(num(n.warmth, 1), warmthTarget(num(p._temp, 15)), NEEDS.envRatePerHour, ticks));
-  n.beauty = clamp01(approach(num(n.beauty, 0.5), num(p._beautyT, 0.5), 1.2, ticks));
   const ct = comfortTarget(M, p);
   if (ct !== null) n.comfort = clamp01(approach(num(n.comfort, 0.5), Math.max(ct, num(n.comfort, 0.5) * 0.98), 0.8, ticks));
   else n.comfort = clamp01(num(n.comfort, 0.5) - (0.35 / DAY) * ticks);
@@ -51,7 +38,7 @@ export function registerNeeds(M) {
       const ticks = dt * 60;
       const now = g.time.tick;
       const hour = now % H === 0;
-      M.R._travelling = !!safeCall(g, 'travel', () => g.api.journey.isTravelling?.() || g.api.journey.getTrainState?.()?.moving, false);
+      if (now % 60 === 0) M.R._travelling = !!safeCall(g, 'travel', () => g.api.journey.isTravelling?.() || g.api.journey.getTrainState?.()?.moving, false);
       for (const p of g.entities.ofKind('pawn')) {
         if (p.dead || p.faction !== 'colony' || p.animal || p.prisoner) continue;
         if (p.mindv !== 1) ensurePawn(M, p);
@@ -61,7 +48,7 @@ export function registerNeeds(M) {
         if (!p.asleep) n.rest = clamp01(num(n.rest, 1) - (NEEDS.restPerHourAwake / H) * eff.restDecay * ticks);
         const ph = (now + p.id * 7) % 30;
         if (ph === 0) {
-          slowNeeds(M, p, 30, (now + p.id * 7) % 120 === 0);
+          slowNeeds(M, p, 30);
           if ((now + p.id * 7) % 60 === 0) computeSitu(M, p);
           updateMood(M, p, 30);
         }
@@ -123,7 +110,7 @@ export function registerNeeds(M) {
     override: true,
     factions: ['colony'],
     evaluate(g, pawn, ctx) {
-      if (pawn.mindBreak || pawn.animal) return null;
+      if (pawn.animal || (pawn.mindBreak && num(pawn.needs.food, 1) >= NEEDS.starvingAt)) return null;
       const t = pawn.job?.type;
       if (t === 'eat' || t === 'mind_eat') return null;
       const food = pawn.needs.food ?? 1;
@@ -139,7 +126,7 @@ export function registerNeeds(M) {
     override: true,
     factions: ['colony'],
     evaluate(g, pawn) {
-      if (pawn.mindBreak || pawn.animal) return null;
+      if (pawn.animal || (pawn.mindBreak && num(pawn.needs.rest, 1) >= 0.04)) return null;
       const rest = pawn.needs.rest ?? 1;
       const sch = pawn.schedule?.[g.time.hourInt];
       const sleepTime = sch ? sch === 'sleep' : g.time.isSleepTime();
@@ -154,9 +141,9 @@ export function registerNeeds(M) {
     override: true,
     factions: ['colony'],
     evaluate(g, pawn) {
-      if (pawn.animal) return null;
+      if (pawn.animal || pawn.mindBreak) return null;
       const sch = pawn.schedule?.[g.time.hourInt];
-      if (sch === 'joy') return null;
+      if (sch === 'joy' && num(pawn.needs.joy, 1) < 0.95) return null;
       if (sch === 'sleep' && (pawn.needs.rest ?? 1) < 0.9) return null;
       const job = g.jobs.findWork(pawn);
       if (job && refusesJob(M, pawn, job)) return null;
