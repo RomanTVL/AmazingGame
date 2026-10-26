@@ -42,6 +42,7 @@ export function startBreak(M, p, tier = 'minor', kind = null) {
   const hours = rng.range(d.hours[0], d.hours[1]) * (TIER_MUL[tier] || 1);
   p.mindBreak = { kind, tier, start: now, until: Math.round(now + hours * H) };
   if (p.job) game.jobs.endJob(p, 'cancelled');
+  M.R.talks.delete(p.id);
   p._thinkCooldown = 0;
   const name = firstName(p);
   const label = game.t(`mind.break.${kind}`);

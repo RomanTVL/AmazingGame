@@ -18,6 +18,7 @@ import { registerNeeds } from './core/needs.js';
 import { registerSocial, line, converse } from './core/social.js';
 import { registerBreaks, isInBreak, startBreak, endBreak } from './core/breaks.js';
 import { pawnOverlay } from './core/render.js';
+import { touchFurniture } from './core/env.js';
 import { addThought, removeThought, registerThought, getMood, thoughtList, computeSitu, updateMood } from './core/mood.js';
 import { hasTrait, addTrait, revealTrait, removeTrait, traitEffects } from './core/traits.js';
 import { learn, skillLevel, skillFactor, getSkill } from './core/skills.js';
@@ -83,6 +84,8 @@ function buildApi(M) {
     partnerOf: (p) => partnerOf(M, p),
     generateCandidate: (rng, opts) => generateCandidate(M, rng, opts || {}),
     getBio: (pawn) => getBio(M, pawn),
+    /** Начать беседу a → b прямо сейчас (результат: {kind, glyph, red, ticks}). */
+    converse: (a, b, opts) => (a && b && a !== b ? converse(M, a, b, opts || {}) : null),
     lastWords: (pawn) => lastWords(M, pawn),
     /** Сводка для карточки персонажа (ui). Настроение — в процентах 0..100. */
     getSheet(pawn) {
@@ -145,6 +148,8 @@ export function register(game) {
     ensurePawn(M, pawn);
   }, 'mind');
 
+  game.events.on(EVENTS.ENTITY_SPAWNED, ({ entity }) => touchFurniture(M, entity), 'mind');
+  game.events.on(EVENTS.ENTITY_REMOVED, ({ entity }) => touchFurniture(M, entity), 'mind');
   game.events.on(EVENTS.WORLD_RESET, () => M.reset(), 'mind');
 
   game.events.on(EVENTS.COLONY_STARTED, ({ seed } = {}) => {
