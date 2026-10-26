@@ -9,46 +9,45 @@ export function installJobs(B) {
   const game = B.game;
   const J = game.jobs;
 
-  // ---------------- Подноска материалов ----------------
-  J.registerJobType(
-    {
-      id: 'build_deliver',
-      workType: 'hauling',
-      labelKey: 'build.job.deliver',
-      priority: 60,
-      adjacent: true,
-      findJob: (g, pawn) => findDelivery(B, pawn),
-      reserve(g, pawn, job) {
-        const keys = [`bpm:${job.data.bpId}:${job.data.defId}`];
-        if (job.targetId) keys.push(resKey.entity(job.targetId));
-        return keys;
-      },
-      makeToils(g, pawn, job) {
-        const toils = [];
-        if (!job.data.carried) {
-          toils.push({ type: 'goto', targetId: job.targetId, adjacent: true }, { type: 'pickup', targetId: job.targetId, count: job.data.count });
-        }
-        toils.push(
-          { type: 'goto', targetId: job.data.bpId, adjacent: true },
-          {
-            type: 'interact',
-            fn(gg, p) {
-              const bp = gg.entities.get(job.data.bpId);
-              return B.depositCarry(bp, p) ? 'done' : 'failed';
-            },
-          },
-        );
-        return toils;
-      },
-      failIf(g, pawn, job) {
-        const bp = g.entities.get(job.data.bpId);
-        if (!bp || bp.removed) return true;
-        if (job.data.carried && job.i === 0 && pawn.carry?.defId !== job.data.defId) return true;
-        return false;
-      },
+  // ---------------- Подноска материалов (носильщики; строители — для своих чертежей тоже) ----------------
+  const deliverJob = (id, workType, priority) => ({
+    id,
+    workType,
+    labelKey: 'build.job.deliver',
+    priority,
+    adjacent: true,
+    findJob: (g, pawn) => findDelivery(B, pawn),
+    reserve(g, pawn, job) {
+      const keys = [`bpm:${job.data.bpId}:${job.data.defId}`];
+      if (job.targetId) keys.push(resKey.entity(job.targetId));
+      return keys;
     },
-    OWNER,
-  );
+    makeToils(g, pawn, job) {
+      const toils = [];
+      if (!job.data.carried) {
+        toils.push({ type: 'goto', targetId: job.targetId, adjacent: true }, { type: 'pickup', targetId: job.targetId, count: job.data.count });
+      }
+      toils.push(
+        { type: 'goto', targetId: job.data.bpId, adjacent: true },
+        {
+          type: 'interact',
+          fn(gg, p) {
+            const bp = gg.entities.get(job.data.bpId);
+            return B.depositCarry(bp, p) ? 'done' : 'failed';
+          },
+        },
+      );
+      return toils;
+    },
+    failIf(g, pawn, job) {
+      const bp = g.entities.get(job.data.bpId);
+      if (!bp || bp.removed) return true;
+      if (job.data.carried && job.i === 0 && pawn.carry?.defId !== job.data.defId) return true;
+      return false;
+    },
+  });
+  J.registerJobType(deliverJob('build_deliver', 'hauling', 60), OWNER);
+  J.registerJobType(deliverJob('build_supply', 'construction', 50), OWNER);
 
   // ---------------- Стройка по чертежу ----------------
   J.registerJobType(

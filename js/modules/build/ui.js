@@ -2,6 +2,7 @@
 // и прямоугольником (пол), ПКМ — отмена; инструменты Z (зоны склада + фильтр) и X (снос/отмена).
 // Отрисовка — только в draw(); кадровая система (order 15) перехватывает ЛКМ до атаки лидера (player, order 30).
 import { TILE } from '../../core/constants.js';
+import { EVENTS } from '../../core/events.js';
 import { rgba } from '../../render/color.js';
 import { OWNER } from './core.js';
 import { MENU_TABS, CATEGORY_TAB, MENU_FLOORS, STOCK_FILTERS } from './defs.js';
@@ -90,12 +91,11 @@ export function makeActions(B) {
   const setMode = (mode) => {
     const u = U();
     u.drag = null;
-    if (mode !== 'place' && game.ui.isOpen('build')) {
-      u.mode = mode;
-      game.ui.closePanel('build');
+    u.mode = mode; // до закрытия меню: onClose сбрасывает только режим 'place'
+    if (mode !== 'place') {
+      u.sel = null;
+      if (game.ui.isOpen('build')) game.ui.closePanel('build');
     }
-    u.mode = mode;
-    if (mode !== 'place') u.sel = null;
   };
 
   /** Поставить чертежи по протяжке. @returns {number} сколько поставлено */
@@ -153,7 +153,7 @@ export function makeActions(B) {
     zone.filter = f.filter ? structuredClone(f.filter) : null;
     zone.data = { ...(zone.data || {}), filterId };
     U().zoneFilter = filterId;
-    game.zones._changed?.(zone);
+    game.events.emit(EVENTS.ZONE_CHANGED, { zone });
     return true;
   };
 
@@ -170,11 +170,11 @@ export function makeActions(B) {
     }
     let n = 0;
     const seen = new Set();
+    if (!B.ensure()) return 0;
     for (let y = ya; y <= yb; y++)
       for (let x = xa; x <= xb; x++) {
         if (!game.map.inBounds(x, y)) continue;
         const k = game.map.idx(x, y);
-        B.ensure();
         for (const id of [B.rt.bp[k], B.rt.fbp[k]]) {
           if (!id || seen.has(id)) continue;
           seen.add(id);
