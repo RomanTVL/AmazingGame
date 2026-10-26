@@ -169,6 +169,7 @@ function registerJobs(game, H) {
     },
     failIf(g, pawn, job) {
       const p = g.entities.get(job.targetId);
+      if (job.data.fromFight && (g.time.tick + pawn.id) % 15 === 0 && inMelee(g, pawn)) return true; // враг вплотную — снова в бой
       return !p || p.dead || p.removed || !!p.carriedById || pawn.downed;
     },
     makeToils(g, pawn, job) {
@@ -243,6 +244,7 @@ function registerJobs(game, H) {
     failIf(g, pawn, job) {
       const p = g.entities.get(job.targetId);
       if (!p || p.dead || p.removed) return true;
+      if (job.data.fromFight && !pawn.carryPawnId && (g.time.tick + pawn.id) % 15 === 0 && inMelee(g, pawn)) return true;
       if (job.i <= 1 && (p.carriedById || !p.downed)) return true;
       return false;
     },
@@ -784,11 +786,12 @@ function registerInteractions(game, H) {
 }
 
 const MELEE_R = 2.5;
+const THREAT_R = 8; // бой бросают, только если ни один враг не подойдёт вплотную за пару секунд
 const BLEED_NEAR_R = 18;
 
-/** В ближнем бою: живой стоящий враг вплотную. */
-function inMelee(game, pawn) {
-  for (const o of game.entities.queryRadius(pawn.x, pawn.y, MELEE_R, 'pawn')) {
+/** В ближнем бою: живой стоящий враг вплотную (r — радиус). */
+function inMelee(game, pawn, r = MELEE_R) {
+  for (const o of game.entities.queryRadius(pawn.x, pawn.y, r, 'pawn')) {
     if (o === pawn || o.dead || o.downed || o.prisoner) continue;
     if (safe(() => game.api.combat.isHostile(pawn, o), false)) return true;
   }
@@ -839,8 +842,10 @@ function registerEmergency(game, H) {
   // бой (combat:fight, 96) ниже 86 не прерывается — тот же «Беда!» выше боя, только для дерущихся врачей
   const emergencyFromFight = (g, pawn) => {
     if (!canHelp(g, pawn) || pawn.job?.type !== 'combat:fight') return null;
-    if (inMelee(g, pawn) || !bleederNear(g, pawn)) return null;
-    return findUrgent(g, pawn, true);
+    if (inMelee(g, pawn, THREAT_R) || !bleederNear(g, pawn)) return null;
+    const job = findUrgent(g, pawn, true);
+    if (job) job.data.fromFight = true;
+    return job;
   };
   game.ai.registerThinkNode({
     id: 'health:emergencyFight',

@@ -277,7 +277,7 @@ export function computeCache(game, pawn, force = false) {
   }
   c.pain = pain;
   c.bleed = blood ? bleed : 0;
-  // мгновенная смерть: разрушен мозг или сердце
+  // мгновенная смерть: разрушен мозг (разбитая голова — тоже мозг) или сердце
   let instant = null;
   for (const id of VITAL) {
     const i = PART_INDEX[id];
