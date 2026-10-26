@@ -1,49 +1,35 @@
-// Ядро модуля build: состояние, индексы (чертежи по клеткам, источники тепла, двери, повреждённое),
-// правила размещения, чертежи → готовые постройки, разборка, урон/разрушение, ремонт, качество.
-// Без DOM: всё здесь работает и в headless.
-import { EVENTS } from '../../core/events.js';
-import { TILE_FLAG, TICKS_PER_HOUR } from '../../core/constants.js';
+// Ядро модуля build (MVP): индексы (чертежи по клеткам, двери), правила размещения, чертежи → готовые постройки,
+// снос с возвратом части материалов, разрушение (рейды), двери (открыты, когда рядом пешка; закрытая — блокирует
+// обзор и свет). Без DOM: всё здесь работает и в headless.
+import { TILE_FLAG } from '../../core/constants.js';
 import { TRAIN_ROOM_BASE, nearestPassable } from '../../sim/train.js';
-import { clamp, safeNum } from '../../core/math.js';
 
 export const OWNER = 'build';
-export const QUALITY = ['awful', 'poor', 'normal', 'good', 'excellent', 'masterwork'];
-export const QUALITY_BEAUTY = [0.4, 0.7, 1, 1.3, 1.6, 2.2];
-export const QUALITY_COMFORT = [0.75, 0.88, 1, 1.1, 1.2, 1.35];
-/** События модуля (имена — контракт для других модулей, см. отчёт). */
+/** События модуля. */
 export const BEV = {
   PLACED: 'build:placed',
   COMPLETED: 'build:completed',
   DECONSTRUCTED: 'build:deconstructed',
   DESTROYED: 'build:destroyed',
-  DAMAGED: 'build:damaged',
   CANCELLED: 'build:cancelled',
-  REPAIRED: 'build:repaired',
   DELIVERED: 'build:delivered',
   FLOOR: 'build:floorCompleted',
   DOOR: 'build:doorChanged',
-  ROOMS: 'build:roomsChanged',
-  ROOM: 'build:roomChanged',
-  SAT: 'build:sat',
-  STOOD: 'build:stood',
-  PLAQUE: 'build:plaqueAssigned',
 };
-export const DIR4 = [[0, -1], [1, 0], [0, 1], [-1, 0]]; // N E S W
+/** Доля материалов, возвращаемая при сносе и при разрушении. */
+export const REFUND_DECONSTRUCT = 0.5;
+export const REFUND_DESTROY = 0.25;
+const DOOR_RADIUS = 1.25;
+const DOOR_EVERY = 4; // тиков между проверками дверей
 const MAX_POPS = 48;
 
 export class Build {
   constructor(game) {
     this.game = game;
-    this.state = this.freshState();
     this.rt = this.freshRuntime();
     /** UI-состояние (ui.js) — не сохраняется. */
     this.ui = null;
-    this._pawnBuf = [];
-    this._entBuf = [];
-  }
-
-  freshState() {
-    return { home: null, fallen: [] };
+    this._buf = [];
   }
 
   freshRuntime() {
@@ -51,31 +37,14 @@ export class Build {
       mapRef: null,
       bp: null, // Int32Array: id чертежа постройки на клетке
       fbp: null, // Int32Array: id чертежа пола на клетке
-      heat: new Set(),
       doors: new Set(),
-      damaged: new Set(),
-      traps: new Set(),
-      plaques: new Set(),
-      roomsDirty: true,
-      rooms: new Map(),
-      roomList: [],
-      statsVersion: 1,
       pops: [],
-      maskKey: null,
-      sit: null,
-      plaquePending: false,
-      lastRects: new Map(),
-      trapCd: new Map(),
       totals: null,
       totalsTick: -1,
     };
   }
 
-  /** Сброс мира (world:reset). Павшие (запасной список) переживают смену станции. */
-  reset(reason) {
-    const fallen = reason === 'station' ? this.state.fallen : [];
-    this.state = this.freshState();
-    this.state.fallen = fallen;
+  reset() {
     this.rt = this.freshRuntime();
   }
 
@@ -92,6 +61,10 @@ export class Build {
     return true;
   }
 
+  dirty() {
+    this.rt.mapRef = null;
+  }
+
   rebuild() {
     const game = this.game;
     const map = game.map;
@@ -99,28 +72,19 @@ export class Build {
     rt.mapRef = map;
     rt.bp = new Int32Array(map.n);
     rt.fbp = new Int32Array(map.n);
-    rt.heat.clear();
     rt.doors.clear();
-    rt.damaged.clear();
-    rt.traps.clear();
-    rt.plaques.clear();
     for (const e of game.entities.ofKind('blueprint')) this.gridSet(e, true);
     for (const b of game.entities.ofKind('building')) this.track(b, true);
-    rt.roomsDirty = true;
-    rt.statsVersion++;
-    if (this.state.home && this.state.home.length !== map.n) this.state.home = null;
   }
 
-  gridSet(e, on, fromX = e.x, fromY = e.y) {
+  gridSet(e, on) {
     const map = this.game.map;
     const grid = e.layer === 'floor' ? this.rt.fbp : this.rt.bp;
-    if (!grid) return;
-    const w = e.w || 1;
-    const h = e.h || 1;
-    for (let j = 0; j < h; j++)
-      for (let i = 0; i < w; i++) {
-        const x = fromX + i;
-        const y = fromY + j;
+    if (!grid || !map) return;
+    for (let j = 0; j < (e.h || 1); j++)
+      for (let i = 0; i < (e.w || 1); i++) {
+        const x = e.x + i;
+        const y = e.y + j;
         if (!map.inBounds(x, y)) continue;
         const k = map.idx(x, y);
         if (on) grid[k] = e.id;
@@ -128,36 +92,21 @@ export class Build {
       }
   }
 
-  /** Классифицировать постройку по индексам (тепло, двери, повреждения...). */
   track(b, add) {
     const def = this.game.defs.buildings.get(b.defId);
-    const rt = this.rt;
     if (!add) {
-      rt.heat.delete(b.id);
-      rt.doors.delete(b.id);
-      rt.damaged.delete(b.id);
-      rt.traps.delete(b.id);
-      rt.plaques.delete(b.id);
-      if (def && isRoomWall(def)) rt.roomsDirty = true;
+      this.rt.doors.delete(b.id);
       return;
     }
-    if (!def) return;
-    if (def.heat || b.heat) rt.heat.add(b.id);
-    if (def.door) rt.doors.add(b.id);
-    if (def.trap) rt.traps.add(b.id);
-    if (def.plaque) rt.plaques.add(b.id);
-    if (this.needsRepair(b, def)) rt.damaged.add(b.id);
-    if (isRoomWall(def)) rt.roomsDirty = true;
+    if (def?.door && !b.train) {
+      this.rt.doors.add(b.id);
+      if (b.open) this.applyDoor(b, def);
+    }
   }
 
   // ---------------- Помощники клеток ----------------
   inWagonK(k) {
     return this.game.map.room[k] >= TRAIN_ROOM_BASE;
-  }
-
-  inWagon(x, y) {
-    const map = this.game.map;
-    return !!map && map.inBounds(x, y) && map.room[map.idx(x, y)] >= TRAIN_ROOM_BASE;
   }
 
   /** Переход между вагонами / прочая «обшивка» поезда без комнаты. */
@@ -174,90 +123,28 @@ export class Build {
     return id ? this.game.entities.get(id) || null : null;
   }
 
-  floorBlueprintAt(x, y) {
-    const map = this.game.map;
-    if (!this.ensure() || !map.inBounds(x, y)) return null;
-    const id = this.rt.fbp[map.idx(x, y)];
-    return id ? this.game.entities.get(id) || null : null;
-  }
-
-  pawnsIn(x0, y0, x1, y1) {
-    const out = this._pawnBuf;
-    out.length = 0;
-    this.game.entities.queryRect(x0, y0, x1, y1, 'pawn', out);
-    let n = 0;
-    for (let i = 0; i < out.length; i++) if (!out[i].dead) out[n++] = out[i];
-    out.length = n;
-    return out;
-  }
-
-  nextToDoor(x, y) {
-    const map = this.game.map;
-    for (const [dx, dy] of DIR4) {
-      const b = map.buildingAt(x + dx, y + dy);
-      if (b && this.game.defs.buildings.get(b.defId)?.door) return true;
-    }
-    return false;
-  }
-
-  /** Сторона со стеной для настенной вещи (0 N, 1 E, 2 S, 3 W) или -1. pref — желаемая сторона. */
-  findMount(x, y, pref = 0) {
-    const map = this.game.map;
-    let found = -1;
-    for (let n = 0; n < 4; n++) {
-      const d = (pref + n) & 3;
-      const [dx, dy] = DIR4[d];
-      const b = map.buildingAt(x + dx, y + dy);
-      const bd = b && this.game.defs.buildings.get(b.defId);
-      if (bd && !bd.passable && !bd.door && (isRoomWall(bd) || bd.connects === 'wall')) {
-        found = d;
-        break;
-      }
-    }
-    return found;
-  }
-
-  /** Окно вагона рядом с прямоугольником: {dx, dy} направление или null. */
-  windowNear(x, y, w = 1, h = 1) {
-    const map = this.game.map;
-    for (let yy = y - 1; yy <= y + h; yy++)
-      for (let xx = x - 1; xx <= x + w; xx++) {
-        if (xx >= x && xx < x + w && yy >= y && yy < y + h) continue;
-        const b = map.buildingAt(xx, yy);
-        if (b && this.game.defs.buildings.get(b.defId)?.window) return { dx: Math.sign(xx - x), dy: Math.sign(yy - y), id: b.id };
-      }
-    return null;
-  }
-
   // ---------------- Размещение ----------------
   /**
-   * Проверка размещения постройки. @returns {{ok, reason, chop: number[]|null, mine: number[]|null, mount, rot}}
-   * Причины: unknown, bounds, occupied, shell, blueprint, plant, terrain, rail, needWagon, needGround, door, pawn, items,
-   * needWall, needWindow.
+   * Проверка размещения постройки. @returns {{ok, reason, chop: number[]|null, mine: number[]|null, rot}}
+   * Причины: unknown, bounds, occupied, shell, blueprint, plant, terrain, rail, needWagon, needGround.
+   * opts.noAuto — не предлагать вырубку/добычу (деревья и скалы мешают).
    */
   check(defId, x, y, rot = 0, opts = {}) {
     const game = this.game;
     const map = game.map;
-    const res = { ok: false, reason: '', chop: null, mine: null, mount: -1, rot: 0 };
+    const res = { ok: false, reason: '', chop: null, mine: null, rot: 0 };
     const def = game.defs.buildings.get(defId);
-    if (!def || !map || !this.ensure()) {
-      res.reason = 'unknown';
-      return res;
-    }
-    if (!Number.isFinite(x) || !Number.isFinite(y)) {
-      res.reason = 'bounds';
-      return res;
-    }
-    x = Math.floor(x);
-    y = Math.floor(y);
-    rot = def.rotatable ? (rot | 0) & 3 : 0;
-    res.rot = rot;
     const fail = (r) => {
       res.reason = r;
       return res;
     };
+    if (!def || !map || !this.ensure()) return fail('unknown');
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return fail('bounds');
+    x = Math.floor(x);
+    y = Math.floor(y);
+    rot = def.rotatable ? (rot | 0) & 3 : 0;
+    res.rot = rot;
     const [w, h] = game.entities.footprintSize(def, rot);
-    const impass = !def.passable;
     for (let j = 0; j < h; j++)
       for (let i = 0; i < w; i++) {
         const tx = x + i;
@@ -268,8 +155,9 @@ export class Build {
         if (bid) {
           const b = game.entities.get(bid);
           const bd = b && game.defs.buildings.get(b.defId);
-          if (bd?.natural && bd.mineable && !opts.noAuto && !bd.indestructible) (res.mine ||= []).includes(b.id) || res.mine.push(b.id);
-          else return fail(b?.train || bd?.category === 'train' ? 'shell' : 'occupied');
+          if (bd?.natural && bd.mineable && !opts.noAuto && !bd.indestructible) {
+            if (!(res.mine ||= []).includes(b.id)) res.mine.push(b.id);
+          } else return fail(b?.train || bd?.category === 'train' ? 'shell' : 'occupied');
         }
         if (this.rt.bp[k]) return fail('blueprint');
         const pid = map.plant[k];
@@ -281,46 +169,29 @@ export class Build {
             else return fail('plant');
           }
         }
-        const td = map.terrainDef(tx, ty);
-        if (!td.buildable && !map.floor[k]) return fail('terrain');
+        if (!map.terrainDef(tx, ty).buildable && !map.floor[k]) return fail('terrain');
         const wag = this.inWagonK(k);
         if (this.isGangwayK(k)) return fail('shell');
         if ((map.flags[k] & TILE_FLAG.RAIL) && !wag) return fail('rail');
         if (def.placeableOn === 'wagon' && !wag) return fail('needWagon');
         if (def.placeableOn === 'ground' && wag) return fail('needGround');
-        if (impass) {
-          if (this.nextToDoor(tx, ty)) return fail('door');
-          if (this.pawnsIn(tx, ty, tx, ty).length) return fail('pawn');
-          if (!def.storage && game.items.itemAt(tx, ty)) return fail('items');
-        }
       }
-    if (def.wallMounted) {
-      res.mount = this.findMount(x, y, rot);
-      if (res.mount < 0 && def.wallMounted === true) return fail('needWall');
-    }
-    if (def.needsWindow && !this.windowNear(x, y, w, h)) return fail('needWindow');
     res.ok = true;
     return res;
   }
 
-  canPlace(defId, x, y, rot = 0) {
-    return this.check(defId, x, y, rot).ok;
+  canPlace(defId, x, y, rot = 0, opts = {}) {
+    return this.check(defId, x, y, rot, opts).ok;
   }
 
-  /** Стоимость постройки по варианту материалов. */
-  costOf(def, opt = 0) {
-    const o = def?.materialOptions?.[opt | 0];
-    return { ...(o || def?.materials || {}) };
-  }
-
-  stuffOf(def, opt = 0) {
-    return def?.optionStuff?.[opt | 0] || def?.stuff || 'wood';
+  costOf(def) {
+    return { ...(def?.materials || {}) };
   }
 
   /**
-   * Поставить постройку. По умолчанию — чертёж (материалы принесут, построят поселенцы или лидер).
-   * opts: {rot, opt (вариант материалов), force (сразу готовая, без проверок), instant (сразу готовая, с проверкой),
-   *        quality (0..5 для готовой), silent}
+   * Поставить постройку. opts.blueprint — чертёж (материалы принесут, построят поселенцы или лидер);
+   * иначе сразу готовая (с проверкой canPlace; opts.force — без проверок, сносит растения/скалы/чертежи).
+   * opts: {rot, blueprint, force}
    * @returns {object|null} чертёж (kind 'blueprint') или готовая постройка
    */
   place(defId, x, y, opts = {}) {
@@ -329,30 +200,24 @@ export class Build {
     if (!def || !game.map || !this.ensure()) return null;
     x = Math.floor(x);
     y = Math.floor(y);
-    let rot = def.rotatable ? (opts.rot | 0) & 3 : 0;
-    const opt = def.materialOptions ? clamp(opts.opt | 0, 0, def.materialOptions.length - 1) : 0;
-    let chk = null;
-    if (!opts.force) {
-      chk = this.check(defId, x, y, rot, { noAuto: !!opts.instant });
-      if (!chk.ok) return null;
+    const rot = def.rotatable ? (opts.rot | 0) & 3 : 0;
+    if (!opts.blueprint) {
+      if (!opts.force && !this.check(defId, x, y, rot, { noAuto: true }).ok) return null;
+      return this.spawnBuilt(def, x, y, { rot, cost: this.costOf(def), force: !!opts.force });
     }
-    if (def.needsWindow) rot = this.autoRotWindow(def, x, y, rot);
-    const mount = def.wallMounted ? (chk ? chk.mount : this.findMount(x, y, rot)) : -1;
-    if (opts.force || opts.instant) {
-      const q = def.quality ? clamp(Number.isFinite(opts.quality) ? opts.quality | 0 : 2, 0, 5) : undefined;
-      return this.spawnBuilt(def, x, y, { rot, quality: q, cost: this.costOf(def, opt), stuff: this.stuffOf(def, opt), mount, opt, force: !!opts.force });
-    }
+    const chk = this.check(defId, x, y, rot);
+    if (!chk.ok) return null;
     const [w, h] = game.entities.footprintSize(def, rot);
     const bp = game.entities.spawn('blueprint', {
-      layer: 'building', buildDefId: defId, x, y, rot, w, h, opt,
-      cost: this.costOf(def, opt), delivered: {}, work: 0, workTotal: Math.max(10, def.workToBuild ?? 100),
-      faction: 'colony', stuff: this.stuffOf(def, opt), mount, placedTick: game.time.tick,
+      layer: 'building', buildDefId: defId, x, y, rot, w, h,
+      cost: this.costOf(def), delivered: {}, work: 0, workTotal: Math.max(10, def.workToBuild ?? 100),
+      faction: 'colony', placedTick: game.time.tick,
     });
-    for (const id of chk?.chop || []) {
+    for (const id of chk.chop || []) {
       const p = game.entities.get(id);
       if (p) game.designations.add('chop', p.x, p.y);
     }
-    for (const id of chk?.mine || []) {
+    for (const id of chk.mine || []) {
       const r = game.entities.get(id);
       if (r) game.designations.add('mine', r.x, r.y);
     }
@@ -360,53 +225,29 @@ export class Build {
     return bp;
   }
 
-  /** Лавка у окна смотрит на окно. */
-  autoRotWindow(def, x, y, rot) {
-    if (!def.rotatable) return rot;
-    const wn = this.windowNear(x, y, 1, 1);
-    if (!wn) return rot;
-    // «перед» при rot 0 — юг; rot 1 — запад; 2 — север; 3 — восток
-    if (wn.dy > 0 && !wn.dx) return 0;
-    if (wn.dx < 0) return 1;
-    if (wn.dy < 0) return 2;
-    if (wn.dx > 0) return 3;
-    return rot;
-  }
-
-  /** Проверка пола: floorId — что положить; null — снять пол. */
+  /** Проверка пола (только на земле). */
   checkFloor(floorId, x, y, opts = {}) {
     const game = this.game;
     const map = game.map;
     const res = { ok: false, reason: '', chop: null };
-    if (!map || !this.ensure()) return Object.assign(res, { reason: 'unknown' });
+    const fail = (r) => Object.assign(res, { reason: r });
+    if (!map || !this.ensure()) return fail('unknown');
     x = Math.floor(x);
     y = Math.floor(y);
-    if (!map.inBounds(x, y)) return Object.assign(res, { reason: 'bounds' });
+    if (!map.inBounds(x, y)) return fail('bounds');
     const k = map.idx(x, y);
-    if (this.rt.fbp[k]) return Object.assign(res, { reason: 'blueprint' });
-    const b = map.buildingAt(x, y);
-    if (b?.train) return Object.assign(res, { reason: 'shell' });
-    const wag = this.inWagonK(k);
-    if (this.isGangwayK(k)) return Object.assign(res, { reason: 'shell' });
-    if (floorId === null) {
-      const cur = map.floorDef(x, y);
-      if (!cur) return Object.assign(res, { reason: 'noFloor' });
-      if (cur.train) return Object.assign(res, { reason: 'shell' });
-      res.ok = true;
-      return res;
-    }
+    if (this.rt.fbp[k]) return fail('blueprint');
     const fd = game.defs.floors.get(floorId);
-    if (!fd || fd.index === 0) return Object.assign(res, { reason: 'unknown' });
-    if (map.floor[k] === fd.index) return Object.assign(res, { reason: 'same' });
-    const td = map.terrainDef(x, y);
-    if (!td.buildable && !fd.bridge && !(map.floor[k] && map.floorDef(x, y)?.bridge)) return Object.assign(res, { reason: 'terrain' });
-    if ((map.flags[k] & TILE_FLAG.RAIL) && !wag) return Object.assign(res, { reason: 'rail' });
-    if (fd.placeableOn === 'wagon' && !wag) return Object.assign(res, { reason: 'needWagon' });
-    if (fd.placeableOn === 'ground' && wag) return Object.assign(res, { reason: 'needGround' });
+    if (!fd || fd.index === 0) return fail('unknown');
+    if (this.inWagonK(k) || this.isGangwayK(k) || map.roof[k] === 1) return fail('shell');
+    if (map.floor[k] === fd.index) return fail('same');
+    if (map.floor[k] && map.floorDef(x, y)?.train) return fail('shell');
+    if (!map.terrainDef(x, y).buildable) return fail('terrain');
+    if (map.flags[k] & TILE_FLAG.RAIL) return fail('rail');
+    const b = map.buildingAt(x, y);
     if (b) {
       const bd = game.defs.buildings.get(b.defId);
-      if (bd && !bd.passable && isRoomWall(bd)) return Object.assign(res, { reason: 'occupied' });
-      if (bd?.natural) return Object.assign(res, { reason: 'occupied' });
+      if (b.train || bd?.natural || (bd && !bd.passable)) return fail('occupied');
     }
     const pid = map.plant[k];
     if (pid) {
@@ -414,32 +255,30 @@ export class Build {
       const pd = p && game.defs.plants.get(p.defId);
       if (pd?.blocksMove) {
         if (pd.choppable && !opts.noAuto) res.chop = [pid];
-        else return Object.assign(res, { reason: 'plant' });
+        else return fail('plant');
       }
     }
     res.ok = true;
     return res;
   }
 
-  /** Чертёж пола (floorId) или снятия пола (floorId === null). opts.force — сразу. */
+  /** Чертёж пола; opts.force — положить сразу. */
   placeFloor(floorId, x, y, opts = {}) {
     const game = this.game;
     const map = game.map;
     if (!map || !this.ensure()) return null;
     x = Math.floor(x);
     y = Math.floor(y);
-    const chk = opts.force ? { ok: true, chop: null } : this.checkFloor(floorId, x, y, opts);
+    const chk = this.checkFloor(floorId, x, y, { noAuto: !!opts.force });
     if (!chk.ok) return null;
     if (opts.force) {
-      this.applyFloor(floorId, x, y);
+      map.setFloor(x, y, floorId);
       return { x, y, floorId };
     }
-    const cur = map.floorDef(x, y);
-    const fd = floorId ? game.defs.floors.get(floorId) : cur;
+    const fd = game.defs.floors.get(floorId);
     const bp = game.entities.spawn('blueprint', {
-      layer: 'floor', floorId: floorId || cur?.id || null, remove: floorId === null, x, y, w: 1, h: 1,
-      cost: floorId ? { ...(fd?.materials || {}) } : {}, delivered: {}, work: 0,
-      workTotal: Math.max(10, Math.round((fd?.workToBuild ?? 60) * (floorId ? 1 : 0.5))), faction: 'colony', placedTick: game.time.tick,
+      layer: 'floor', floorId, x, y, w: 1, h: 1, cost: { ...(fd?.materials || {}) }, delivered: {}, work: 0,
+      workTotal: Math.max(10, fd?.workToBuild ?? 60), faction: 'colony', placedTick: game.time.tick,
     });
     for (const id of chk.chop || []) {
       const p = game.entities.get(id);
@@ -447,67 +286,6 @@ export class Build {
     }
     game.events.emit(BEV.PLACED, { entity: bp });
     return bp;
-  }
-
-  /** Положить/снять пол (запоминая полы внутри вагонов — они переживают перестановку и переезд). */
-  applyFloor(floorId, x, y) {
-    const game = this.game;
-    const map = game.map;
-    const k = map.idx(x, y);
-    const wag = this.inWagonK(k);
-    const car = wag ? game.train?.carAt(x, y) : null;
-    if (car?.rect) {
-      const rec = ((car.data.build ||= {}).floors ||= []);
-      const dx = x - car.rect.x;
-      const dy = y - car.rect.y;
-      const i = rec.findIndex((f) => f[0] === dx && f[1] === dy);
-      if (i >= 0) rec.splice(i, 1);
-      if (floorId) rec.push([dx, dy, floorId]);
-      map.setFloor(x, y, floorId || 'wagon_planks');
-    } else map.setFloor(x, y, floorId || null);
-    this.rt.statsVersion++;
-  }
-
-  /** Поставить запомненные полы вагонов (после train:stamped). */
-  applyWagonFloors() {
-    const game = this.game;
-    const train = game.train;
-    const map = game.map;
-    if (!train || !map) return;
-    this.rt.lastRects.clear();
-    map.batch(() => {
-      for (const car of train.cars) {
-        if (!car.rect) continue;
-        this.rt.lastRects.set(car.id, { ...car.rect });
-        for (const [dx, dy, fid] of car.data?.build?.floors || []) {
-          const x = car.rect.x + dx;
-          const y = car.rect.y + dy;
-          if (!map.inBounds(x, y) || !game.defs.floors.has(fid)) continue;
-          if (x <= car.rect.x || y <= car.rect.y || x >= car.rect.x + car.rect.w - 1 || y >= car.rect.y + car.rect.h - 1) continue;
-          map.setFloor(x, y, fid);
-        }
-      }
-    });
-  }
-
-  /** Снять наши полы со старых мест вагонов (train:unstamped на той же карте). */
-  clearWagonFloors() {
-    const game = this.game;
-    const train = game.train;
-    const map = game.map;
-    if (!train || !map) return;
-    map.batch(() => {
-      for (const car of train.cars) {
-        const r = this.rt.lastRects.get(car.id);
-        if (!r) continue;
-        for (const [dx, dy, fid] of car.data?.build?.floors || []) {
-          const x = r.x + dx;
-          const y = r.y + dy;
-          if (map.inBounds(x, y) && map.floorDef(x, y)?.id === fid) map.setFloor(x, y, null);
-        }
-      }
-    });
-    this.rt.lastRects.clear();
   }
 
   // ---------------- Чертежи ----------------
@@ -530,7 +308,7 @@ export class Build {
     return true;
   }
 
-  /** Что мешает начать стройку: 'plant' | 'rock' | '' */
+  /** Что мешает начать стройку: 'plant' | 'rock' | 'shell' | 'bounds' | '' */
   blockedReason(bp) {
     const game = this.game;
     const map = game.map;
@@ -564,16 +342,17 @@ export class Build {
     const need = (bp.cost?.[c.defId] || 0) - (bp.delivered?.[c.defId] || 0);
     if (need <= 0) return false;
     const n = Math.min(need, c.count);
+    const defId = c.defId;
     bp.delivered ||= {};
-    bp.delivered[c.defId] = (bp.delivered[c.defId] || 0) + n;
+    bp.delivered[defId] = (bp.delivered[defId] || 0) + n;
     c.count -= n;
     if (c.count <= 0) pawn.carry = null;
-    this.game.events.emit(BEV.DELIVERED, { blueprint: bp, pawn, defId: c.defId, count: n });
+    this.game.events.emit(BEV.DELIVERED, { blueprint: bp, pawn, defId, count: n });
     this.game.audio.play('drop', { x: bp.x + 0.5, y: bp.y + 0.5, vol: 0.5 });
     return true;
   }
 
-  /** Отменить чертёж (вернуть принесённое целиком). */
+  /** Отменить чертёж (принесённое возвращается целиком). */
   cancel(bp, opts = {}) {
     const game = this.game;
     if (!bp || bp.removed || bp.kind !== 'blueprint') return false;
@@ -585,27 +364,7 @@ export class Build {
     return true;
   }
 
-  /** Множитель скорости стройки (навык — только если mind сам не даёт skillFactor; «Отдохнувший» +10%). */
-  workFactor(pawn) {
-    const game = this.game;
-    let f = 1;
-    if (!game.providers?.mind?.skillFactor) {
-      const lvl = safeNum(game.api.mind.skillLevel(pawn, 'construction'), 0, 20, 3);
-      f *= 0.7 + 0.1 * lvl;
-    }
-    if (pawn?.rested && pawn.rested.untilTick > game.time.tick) f *= 1.1;
-    return clamp(f, 0.3, 4);
-  }
-
-  /** Качество по навыку строителя (детерминированно через game.rng). */
-  rollQuality(pawn) {
-    const game = this.game;
-    const lvl = pawn ? safeNum(game.api.mind.skillLevel(pawn, 'construction'), 0, 20, 3) : 3;
-    const x = 1.6 + lvl * 0.15 + game.rng.normal(0, 0.7);
-    return clamp(Math.round(x), 0, 5);
-  }
-
-  /** Достроить чертёж (шаг работы завершён). */
+  /** Достроить чертёж (работа завершена). */
   finish(bp, pawn) {
     if (!bp || bp.removed) return false;
     if (bp.layer === 'floor') return this.completeFloor(bp, pawn);
@@ -621,47 +380,30 @@ export class Build {
     }
     const { x, y, rot } = bp;
     game.entities.remove(bp, 'built');
-    const q = def.quality ? this.rollQuality(pawn) : undefined;
-    const e = this.spawnBuilt(def, x, y, { rot, quality: q, cost: bp.cost, builtBy: pawn?.id || 0, stuff: bp.stuff, mount: bp.mount, opt: bp.opt });
+    const e = this.spawnBuilt(def, x, y, { rot, cost: bp.cost, builtBy: pawn?.id || 0 });
     if (!e) return null;
     this.juice(e, def);
     game.events.emit(BEV.COMPLETED, { entity: e, pawn: pawn || null });
-    if (q >= 4 && pawn) {
-      game.api.ui.notify(this.t('build.msg.quality', { name: pawn.name, what: this.t(def.nameKey), q: this.t(`build.q.${QUALITY[q]}`) }), { type: 'good', x: e.x, y: e.y, pawnId: pawn.id });
-    }
     return e;
   }
 
   completeFloor(bp, pawn) {
     const game = this.game;
-    const { x, y } = bp;
-    const fid = bp.remove ? null : bp.floorId;
-    const fd = bp.remove ? game.defs.floors.get(bp.floorId) : null;
+    const { x, y, floorId } = bp;
     game.entities.remove(bp, 'built');
-    // мелкие растения под полом убираются
-    const p = game.map.plantAt(x, y);
+    const p = game.map.plantAt(x, y); // мелкие растения под полом убираются
     if (p && !game.defs.plants.get(p.defId)?.blocksMove) game.entities.remove(p, 'cleared');
-    this.applyFloor(fid, x, y);
-    if (fd && !fd.train) {
-      for (const [id, n] of Object.entries(fd.materials || {})) {
-        const k = Math.floor(n * 0.5);
-        if (k > 0 && game.defs.items.has(id)) game.items.spawn(id, k, x, y);
-      }
-    }
-    this.rt.pops.push({ x, y, w: 1, h: 1, color: fid ? game.defs.floors.get(fid)?.color || '#ffd27a' : '#ff5f6d', t0: -1, floor: true });
-    if (this.rt.pops.length > MAX_POPS) this.rt.pops.shift();
-    game.events.emit(BEV.FLOOR, { x, y, floorId: fid, pawn: pawn || null });
+    game.map.setFloor(x, y, floorId);
+    this.pop(x, y, 1, 1, game.defs.floors.get(floorId)?.color || '#ffd27a');
+    game.events.emit(BEV.FLOOR, { x, y, floorId, pawn: pawn || null });
     return true;
   }
 
-  /**
-   * Создать готовую постройку (из чертежа или сразу). Убирает мелкие растения, рассыпает вещи из-под
-   * непроходимой постройки, сдвигает пешек.
-   */
+  /** Создать готовую постройку. Убирает мелкие растения, рассыпает вещи из-под непроходимой, сдвигает пешек. */
   spawnBuilt(def, x, y, o = {}) {
     const game = this.game;
     const map = game.map;
-    const rot = def.rotatable || def.wallMounted ? (o.rot | 0) & 3 : 0;
+    const rot = def.rotatable ? (o.rot | 0) & 3 : 0;
     const [w, h] = game.entities.footprintSize(def, rot);
     for (let j = 0; j < h; j++)
       for (let i = 0; i < w; i++) {
@@ -672,37 +414,27 @@ export class Build {
         if (p && (o.force || !game.defs.plants.get(p.defId)?.blocksMove)) game.entities.remove(p, 'cleared');
         if (o.force) {
           const b = map.buildingAt(tx, ty);
-          const bd = b && game.defs.buildings.get(b.defId);
-          if (bd?.natural) game.entities.remove(b, 'cleared');
+          if (b && game.defs.buildings.get(b.defId)?.natural) game.entities.remove(b, 'cleared');
+          const bp = this.rt.bp?.[map.idx(tx, ty)];
+          if (bp) this.cancel(game.entities.get(bp));
         }
-        const bp = this.rt.bp?.[map.idx(tx, ty)];
-        if (bp && o.force) this.cancel(game.entities.get(bp));
       }
     const props = { defId: def.id, x, y, rot, faction: 'colony', builtTick: game.time.tick };
-    if (o.quality !== undefined) props.quality = o.quality;
     if (o.cost) props.cost = { ...o.cost };
     if (o.builtBy) props.builtBy = o.builtBy;
-    if (o.stuff && o.stuff !== def.stuff) props.stuff = o.stuff;
-    if (o.mount >= 0) props.mount = o.mount;
     const e = game.entities.spawn('building', props);
     if (!def.passable) {
       if (!def.storage) this.displaceItems(x, y, w, h);
       this.nudgePawns(x, y, w, h);
     }
-    this.afterBuilt(e, def);
+    if (def.storage) this.ensureStorageZone(e);
     return e;
   }
 
-  afterBuilt(e, def) {
-    if (def.storage) this.ensureStorageZone(e);
-    if (!this.inWagon(e.x, e.y)) this.markHome(e.x - 1, e.y - 1, e.x + (e.w || 1), e.y + (e.h || 1), true);
-    if (def.plaque) this.rt.plaquePending = true;
-    this.rt.statsVersion++;
-  }
-
-  /** Стеллажу/сундуку — склад на его клетках (если там ещё нет складской зоны). */
+  /** Сундуку/стеллажу — склад на его клетках (если там ещё нет складской зоны). */
   ensureStorageZone(e) {
     const game = this.game;
+    if (!game.defs.zoneTypes.has('stockpile')) return;
     const cells = [];
     for (let j = 0; j < (e.h || 1); j++)
       for (let i = 0; i < (e.w || 1); i++) {
@@ -710,7 +442,7 @@ export class Build {
         if (z && game.zones.isStorage(z)) continue;
         cells.push([e.x + i, e.y + j]);
       }
-    if (!cells.length || !game.defs.zoneTypes.has('stockpile')) return;
+    if (!cells.length) return;
     const z = game.zones.create('stockpile', cells, { name: this.t(game.defs.buildings.get(e.defId)?.nameKey || 'build.zone.stockpile'), priority: 3, color: '#ffe08a', data: { shelfId: e.id } });
     e.zoneId = z.id;
   }
@@ -737,7 +469,11 @@ export class Build {
   nudgePawns(x, y, w, h) {
     const game = this.game;
     const map = game.map;
-    for (const p of this.pawnsIn(x, y, x + w - 1, y + h - 1).slice()) {
+    const out = this._buf;
+    out.length = 0;
+    game.entities.queryRect(x, y, x + w - 1, y + h - 1, 'pawn', out);
+    for (const p of out.slice()) {
+      if (p.dead) continue;
       const spot = nearestPassable(map, Math.floor(p.x), Math.floor(p.y));
       if (!spot) continue;
       p.path = null;
@@ -746,42 +482,48 @@ export class Build {
     }
   }
 
-  /** «Чпок»: пыль, звук, поп-масштаб (рисует ui.js). */
-  juice(e, def) {
-    const game = this.game;
-    const cx = e.x + (e.w || 1) / 2;
-    const cy = e.y + (e.h || 1) / 2;
-    this.rt.pops.push({ id: e.id, x: e.x, y: e.y, w: e.w || 1, h: e.h || 1, color: def.color || '#ffd27a', t0: -1 });
+  /** Вспышка «готово» (рисует ui.js), пыль и звук. */
+  pop(x, y, w, h, color) {
+    this.rt.pops.push({ x, y, w, h, color, t0: -1 });
     if (this.rt.pops.length > MAX_POPS) this.rt.pops.shift();
-    if (game.isHeadless) return;
-    const fx = game.api.av?.effect;
-    if (typeof fx === 'function') fx('dust', cx, cy, { count: 14 });
-    else game.fx.preset('dust', cx, cy, { count: 14, speed: 1.6 });
-    game.api.av.play('build_done', { x: cx, y: cy });
-    if (def.heat) game.api.av.play(game.defs.sfx.has('woomph') ? 'woomph' : 'build_woomph', { x: cx, y: cy });
   }
 
-  // ---------------- Разборка, урон, ремонт ----------------
+  juice(e, def) {
+    const game = this.game;
+    this.pop(e.x, e.y, e.w || 1, e.h || 1, def.color || '#ffd27a');
+    if (game.isHeadless) return;
+    const cx = e.x + (e.w || 1) / 2;
+    const cy = e.y + (e.h || 1) / 2;
+    game.fx.preset('dust', cx, cy, { count: 14, speed: 1.6 });
+    game.audio.play('build_done', { x: cx, y: cy });
+  }
+
+  // ---------------- Снос, разрушение ----------------
   canDeconstruct(e) {
     if (!e || e.removed || e.kind !== 'building') return false;
     const def = this.game.defs.buildings.get(e.defId);
     if (!def || def.natural || def.indestructible || e.train || def.category === 'train') return false;
-    return def.buildable !== false || !!def.rubble || !!def.lockedOf || e.faction === 'colony';
+    return e.faction === 'colony' || def.buildable !== false;
   }
 
-  /** Разобрать сразу: вернуть 50–75% материалов (обломки — их запас). */
+  /** Возврат материалов: доля f от стоимости (вниз). */
+  refundOf(e, f) {
+    const def = this.game.defs.buildings.get(e.defId);
+    const cost = e.cost || this.costOf(def);
+    const out = {};
+    for (const [id, n] of Object.entries(cost)) {
+      const k = Math.floor(n * f);
+      if (k > 0) out[id] = k;
+    }
+    return out;
+  }
+
+  /** Разобрать сразу: вернуть половину материалов. */
   deconstructNow(e, pawn = null, opts = {}) {
     const game = this.game;
     if (!opts.force && !this.canDeconstruct(e)) return false;
-    const def = game.defs.buildings.get(e.defId);
-    const cost = def?.rubble ? e.salvage || {} : e.cost || this.costOf(def, 0);
-    const f = def?.rubble ? 1 : opts.full ? 1 : 0.5 + game.rng.next() * 0.25;
     const { x, y } = e;
-    const refund = {};
-    for (const [id, n] of Object.entries(cost)) {
-      const k = Math.floor(n * f);
-      if (k > 0) refund[id] = k;
-    }
+    const refund = this.refundOf(e, REFUND_DECONSTRUCT);
     this.removeStorageZone(e);
     game.entities.remove(e, 'deconstructed');
     for (const [id, n] of Object.entries(refund)) if (game.defs.items.has(id)) game.items.spawn(id, n, x, y);
@@ -795,243 +537,93 @@ export class Build {
     return !!this.game.designations.add('deconstruct', e.x, e.y);
   }
 
-  maxHp(e, def = this.game.defs.buildings.get(e.defId)) {
-    return Math.max(1, def?.hp ?? 100);
-  }
-
-  needsRepair(e, def = this.game.defs.buildings.get(e.defId)) {
-    if (!def || def.natural || def.rubble) return false;
-    if (e.faded) return true;
-    if (def.indestructible) return false;
-    return (e.hp ?? def.hp ?? 100) < this.maxHp(e, def) - 0.5;
-  }
-
-  /** Стадия повреждений для отрисовки: 0 цела, 1 повреждена, 2 разбита. */
-  damageStage(e, def) {
-    const hp = e.hp ?? def?.hp ?? 100;
-    const r = hp / this.maxHp(e, def);
-    return r > 0.66 ? 0 : r > 0.33 ? 1 : 2;
-  }
-
-  /**
-   * Урон постройке. opts: {source, type, cause}. При 0 — разрушение (обломки, часть материалов).
-   * @returns {number} оставшаяся прочность (0 — разрушена)
-   */
-  damage(e, amount, opts = {}) {
-    const game = this.game;
-    if (!e || e.removed || e.kind !== 'building' || !(amount > 0)) return e?.hp ?? 0;
-    const def = game.defs.buildings.get(e.defId);
-    if (!def || def.indestructible) return e.hp ?? def?.hp ?? 0;
-    const before = this.damageStage(e, def);
-    e.hp = Math.max(0, (e.hp ?? def.hp ?? 100) - amount);
-    this.rt.damaged.add(e.id);
-    game.events.emit(BEV.DAMAGED, { entity: e, amount, source: opts.source || null });
-    if (e.hp <= 0) {
-      this.destroy(e, opts);
-      return 0;
-    }
-    if (def.bake && this.damageStage(e, def) !== before) game.map.touch(e.x, e.y, e.w || 1, e.h || 1);
-    return e.hp;
-  }
-
-  /** Разрушение: обломки на месте, 25% материалов вещами, ещё ~25% — в обломках. */
+  /** Разрушение (прочность 0 — рейд, огонь): четверть материалов остаётся на месте. Зовёт combat. */
   destroy(e, opts = {}) {
     const game = this.game;
     if (!e || e.removed) return false;
     const def = game.defs.buildings.get(e.defId);
     const { x, y } = e;
-    const w = e.w || 1;
-    const h = e.h || 1;
-    const cost = e.cost || this.costOf(def, 0);
+    const refund = def && !def.natural ? this.refundOf(e, REFUND_DESTROY) : {};
     this.removeStorageZone(e);
     game.entities.remove(e, 'destroyed');
-    if (def?.rubble) return true;
-    const drop = {};
-    const salvage = {};
-    for (const [id, n] of Object.entries(cost)) {
-      const a = Math.floor(n * 0.25);
-      if (a > 0) drop[id] = a;
-      const b = Math.floor(n * 0.25);
-      if (b > 0) salvage[id] = b;
-    }
-    const rubbleCells = isRoomWall(def || {}) && w * h <= 4 ? w * h : 1;
-    for (let c = 0; c < rubbleCells; c++) {
-      const rx = x + (c % w);
-      const ry = y + Math.floor(c / w);
-      if (!game.map.inBounds(rx, ry) || game.map.buildingAt(rx, ry)) continue;
-      game.entities.spawn('building', { defId: 'rubble', x: rx, y: ry, faction: 'colony', salvage: c === 0 ? salvage : {}, variant: (rx * 7 + ry * 13) & 7 });
-    }
-    for (const [id, n] of Object.entries(drop)) if (game.defs.items.has(id)) game.items.spawn(id, n, x, y);
-    game.events.emit(BEV.DESTROYED, { entity: e, x, y, cause: opts.cause || opts.type || 'damage', source: opts.source || null });
+    for (const [id, n] of Object.entries(refund)) if (game.defs.items.has(id)) game.items.spawn(id, n, x, y);
+    game.events.emit(BEV.DESTROYED, { entity: e, x, y, cause: opts.reason || opts.cause || 'damage', source: opts.source || null });
     if (!game.isHeadless) {
-      const cx = x + w / 2;
-      const cy = y + h / 2;
-      const fx = game.api.av?.effect;
-      if (typeof fx === 'function') fx('dust', cx, cy, { count: 24 });
-      else game.fx.preset('dust', cx, cy, { count: 24, speed: 2.2 });
+      const cx = x + (e.w || 1) / 2;
+      const cy = y + (e.h || 1) / 2;
+      game.fx.preset('dust', cx, cy, { count: 24, speed: 2.2 });
       game.fx.preset('chips', cx, cy, { count: 10, color: def?.color || '#c98a4b' });
-      game.api.av.shake(0.18);
-      game.api.av.play('build_collapse', { x: cx, y: cy });
+      game.audio.play('build_collapse', { x: cx, y: cy });
     }
     return true;
   }
 
-  /** Ремонт завершён: полная прочность, «стёртость» снята. */
-  repaired(e, pawn = null) {
+  maxHp(e, def = this.game.defs.buildings.get(e.defId)) {
+    return Math.max(1, def?.hp ?? 100);
+  }
+
+  // ---------------- Двери ----------------
+  /** Тик: дверь открыта, пока в ней или рядом пешка. */
+  updateDoors(tick) {
+    if (tick % DOOR_EVERY !== 0 || !this.ensure() || !this.rt.doors.size) return;
     const game = this.game;
-    if (!e || e.removed) return false;
-    const def = game.defs.buildings.get(e.defId);
-    const wasFaded = !!e.faded;
-    e.hp = this.maxHp(e, def);
-    if (e.faded) e.faded = false;
-    this.applyFaded(e, def);
-    this.rt.damaged.delete(e.id);
-    if (def?.bake) game.map.touch(e.x, e.y, e.w || 1, e.h || 1);
-    this.rt.statsVersion++;
-    game.events.emit(BEV.REPAIRED, { entity: e, pawn, faded: wasFaded });
-    return true;
-  }
-
-  /** Привести вид к флагу building.faded (ставит combat: Костяной дракон): серый вид, свет вполсилы. */
-  applyFaded(e, def = this.game.defs.buildings.get(e.defId)) {
-    e._fadedSeen = !!e.faded;
-    if (!def) return;
-    if (e.faded) {
-      this.rt.damaged.add(e.id);
-      if (def.light && (!e.light || e.lightByBuild)) {
-        e.light = { ...def.light, intensity: (def.light.intensity ?? 1) * 0.5, color: '#a6adc2' };
-        e.lightByBuild = true;
+    for (const id of this.rt.doors) {
+      const e = game.entities.get(id);
+      if (!e || e.removed) {
+        this.rt.doors.delete(id);
+        continue;
       }
-    } else if (e.lightByBuild) {
-      delete e.light;
-      delete e.lightByBuild;
+      const out = this._buf;
+      out.length = 0;
+      game.entities.queryRadius(e.x + 0.5, e.y + 0.5, DOOR_RADIUS, 'pawn', (p) => !p.dead, out);
+      const open = out.length > 0;
+      if (open === !!e.open) continue;
+      e.open = open;
+      this.applyDoor(e);
+      game.events.emit(BEV.DOOR, { entity: e, open });
     }
-    if (def.bake) this.game.map.touch(e.x, e.y, e.w || 1, e.h || 1);
-    this.rt.statsVersion++;
   }
 
-  /** Работа на ремонт (в единицах работы). */
-  repairWork(e, def = this.game.defs.buildings.get(e.defId)) {
-    const miss = 1 - (e.hp ?? def?.hp ?? 100) / this.maxHp(e, def);
-    return Math.max(40, Math.round((def?.workToBuild ?? 100) * 0.6 * clamp(miss, 0, 1) + (e.faded ? 120 : 0)));
-  }
-
-  // ---------------- Свойства построек ----------------
-  qualityOf(e) {
-    return Number.isFinite(e?.quality) ? clamp(e.quality | 0, 0, 5) : 2;
-  }
-
-  beautyOf(e, def = this.game.defs.buildings.get(e.defId)) {
-    if (!def) return 0;
-    let b = def.beauty || 0;
-    if (b > 0 && def.quality) b *= QUALITY_BEAUTY[this.qualityOf(e)];
-    if (e.faded) b -= 2;
-    const st = this.damageStage(e, def);
-    if (st === 2) b -= 1;
-    return b;
-  }
-
-  comfortOf(e, def = this.game.defs.buildings.get(e?.defId)) {
-    if (!def || !def.comfort) return 0;
-    let c = def.comfort * (def.quality ? QUALITY_COMFORT[this.qualityOf(e)] : 1);
-    if (e.faded) c *= 0.5;
-    return clamp(c, 0, 1.5);
-  }
-
-  /** Укрытие постройки на клетке (0..1) — для combat. */
-  coverAt(x, y) {
+  /** Привести слои обзора/света клетки двери к её состоянию (ядро считает дверь по def — закрытой). */
+  applyDoor(e, def = this.game.defs.buildings.get(e.defId)) {
     const map = this.game.map;
-    if (!map?.inBounds(x, y)) return 0;
-    const b = map.buildingAt(x, y);
-    if (b) {
-      const def = this.game.defs.buildings.get(b.defId);
-      let c = def?.cover ?? (def && !def.passable ? (def.natural ? 0.75 : 0.5) : 0);
-      if (b.faded) c *= 0.5;
-      return clamp(c, 0, 1);
-    }
-    const p = map.plantAt(x, y);
-    if (p && this.game.defs.plants.get(p.defId)?.blocksMove) return 0.4;
-    return 0;
+    if (!map || !def || !map.inBounds(e.x, e.y)) return;
+    const k = map.idx(e.x, e.y);
+    if (map.building[k] !== e.id) return;
+    map.blocksVision[k] = !e.open && def.blocksVision ? 1 : 0;
+    map.blocksLight[k] = !e.open && def.blocksLight ? 1 : 0;
+    map.version++;
   }
 
-  /** Лучшее укрытие цели от стрелка: клетка рядом с целью по направлению к стрелку. */
-  coverFor(target, fromX, fromY) {
-    if (!target) return 0;
-    const tx = Math.floor(target.x);
-    const ty = Math.floor(target.y);
-    const dx = Math.sign(Math.round(fromX - target.x));
-    const dy = Math.sign(Math.round(fromY - target.y));
-    let best = this.coverAt(tx, ty) * 0.5;
-    if (dx || dy) {
-      best = Math.max(best, this.coverAt(tx + dx, ty + dy));
-      if (dx && dy) best = Math.max(best, this.coverAt(tx + dx, ty) * 0.8, this.coverAt(tx, ty + dy) * 0.8);
+  /** После map:changed ядро пересчитало клетки — вернуть открытые двери в этой области. */
+  reapplyDoors(x0, y0, w, h) {
+    if (!this.rt.doors.size) return;
+    for (const id of this.rt.doors) {
+      const e = this.game.entities.get(id);
+      if (!e?.open) continue;
+      if (e.x >= x0 && e.y >= y0 && e.x < x0 + w && e.y < y0 + h) this.applyDoor(e);
     }
-    return clamp(best, 0, 1);
   }
 
-  /** Имя для подсказок: «???» у стёртых, иначе имя (+ качество). */
+  isDoorOpen(e) {
+    return !!e?.open;
+  }
+
+  // ---------------- Разное ----------------
   displayName(e) {
     if (!e) return '';
     if (e.kind === 'blueprint') return this.t('build.tt.blueprint', { name: this.t(this.defOfBp(e)?.nameKey || '') });
     const def = this.game.defs.buildings.get(e.defId);
-    if (e.faded) return '???';
-    const name = def ? this.t(def.nameKey) : String(e.defId);
-    return def?.quality ? `${name} (${this.t(`build.q.${QUALITY[this.qualityOf(e)]}`)})` : name;
+    return def ? this.t(def.nameKey) : String(e.defId);
   }
 
-  // ---------------- Дом ----------------
-  ensureHome() {
-    const map = this.game.map;
-    if (!map) return null;
-    if (!this.state.home || this.state.home.length !== map.n) this.state.home = new Uint8Array(map.n);
-    return this.state.home;
-  }
-
-  markHome(x0, y0, x1, y1, on) {
-    const map = this.game.map;
-    const h = this.ensureHome();
-    if (!h) return 0;
-    let n = 0;
-    for (let y = Math.max(0, y0); y <= Math.min(map.h - 1, y1); y++)
-      for (let x = Math.max(0, x0); x <= Math.min(map.w - 1, x1); x++) {
-        const k = map.idx(x, y);
-        const v = on ? 1 : 0;
-        if (h[k] !== v) {
-          h[k] = v;
-          n++;
-        }
-      }
-    return n;
-  }
-
-  isHome(x, y) {
-    const map = this.game.map;
-    const h = this.state.home;
-    return !!h && !!map && map.inBounds(x, y) && h.length === map.n && h[map.idx(x, y)] === 1;
-  }
-
-  /** Сумма вещей колонии (кэш на 30 тиков) — для подсветки «по карману» в меню. */
+  /** Сумма вещей колонии (кэш на 30 тиков) — подсветка «по карману» в меню. */
   totals() {
     const tick = this.game.time.tick;
-    if (!this.rt.totals || tick - this.rt.totalsTick > 30) {
+    if (!this.rt.totals || tick - this.rt.totalsTick > 30 || tick < this.rt.totalsTick) {
       this.rt.totals = this.game.items.totals();
       this.rt.totalsTick = tick;
     }
     return this.rt.totals;
   }
-
-  hoursToTicks(h) {
-    return Math.round(h * TICKS_PER_HOUR);
-  }
 }
-
-/** Ограничивает ли постройка комнату (стены, двери, частокол, скалы). */
-export function isRoomWall(def) {
-  if (!def) return false;
-  if (def.roomWall || def.door) return true;
-  if (def.connects === 'wall' && !def.passable) return true;
-  if (def.natural && !def.passable) return true;
-  return false;
-}
-
-export { EVENTS };

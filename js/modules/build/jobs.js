@@ -1,5 +1,5 @@
-// Задачи стройки: подноска материалов (hauling), стройка (construction), разборка по пометке, ремонт.
-// Действия E лидера: строить (удерживать), принести/отдать материалы, разобрать, починить, запереть дверь, табличка.
+// Задачи стройки: подноска материалов (hauling), стройка (construction), разборка по пометке.
+// Действия E лидера: строить (удерживать), принести/отдать материалы, разобрать (удерживать).
 import { resKey, thingWorkJob } from '../../sim/jobs.js';
 import { OWNER } from './core.js';
 
@@ -69,7 +69,6 @@ export function installJobs(B) {
       makeToils(g, pawn, job) {
         const bp = g.entities.get(job.targetId);
         if (!bp) return [];
-        const f = B.workFactor(pawn);
         const start = bp.work || 0;
         const total = Math.max(1, bp.workTotal || 60);
         const left = Math.max(1, total - start);
@@ -77,14 +76,14 @@ export function installJobs(B) {
           { type: 'goto', targetId: bp.id, adjacent: true },
           {
             type: 'work',
-            ticks: Math.ceil(left / f),
+            ticks: left,
             workType: 'construction',
             targetId: bp.id,
             fx: 'build',
             onTick(gg) {
               const b = gg.entities.get(job.targetId);
               if (!b) return 'failed';
-              b.work = Math.min(total, start + (this._p || 0) * f);
+              b.work = Math.min(total, start + (this._p || 0));
               return undefined;
             },
             onDone(gg, p) {
@@ -144,65 +143,6 @@ export function installJobs(B) {
         B.deconstructNow(t, pawn);
       },
     }),
-    OWNER,
-  );
-
-  // ---------------- Ремонт ----------------
-  J.registerJobType(
-    {
-      id: 'build_repair',
-      workType: 'construction',
-      labelKey: 'build.job.repair',
-      priority: 40,
-      adjacent: true,
-      *findTargets(g) {
-        if (!B.ensure()) return;
-        const anyHome = !!B.state.home;
-        for (const id of B.rt.damaged) {
-          const e = g.entities.get(id);
-          if (!e || e.removed) continue;
-          if (!B.needsRepair(e)) continue;
-          if (!e.faded && !B.inWagon(e.x, e.y) && anyHome && !B.isHome(e.x, e.y)) continue;
-          yield { x: e.x, y: e.y, targetId: e.id };
-        }
-      },
-      canDo(g, pawn, spec) {
-        const e = g.entities.get(spec.targetId);
-        return !!e && e.kind === 'building' && B.needsRepair(e);
-      },
-      makeToils(g, pawn, job) {
-        const e = g.entities.get(job.targetId);
-        if (!e) return [];
-        const def = g.defs.buildings.get(e.defId);
-        const work = B.repairWork(e, def);
-        const f = B.workFactor(pawn);
-        const hp0 = e.hp ?? def?.hp ?? 100;
-        const max = B.maxHp(e, def);
-        return [
-          { type: 'goto', targetId: e.id, adjacent: true },
-          {
-            type: 'work',
-            ticks: Math.ceil(work / f),
-            workType: 'construction',
-            targetId: e.id,
-            fx: 'build',
-            onTick(gg) {
-              const t = gg.entities.get(job.targetId);
-              if (!t) return 'failed';
-              const p = Math.min(1, ((this._p || 0) * f) / work);
-              t.hp = Math.min(max, hp0 + (max - hp0) * p);
-              return undefined;
-            },
-            onDone(gg, p) {
-              const t = gg.entities.get(job.targetId);
-              if (!t) return 'failed';
-              B.repaired(t, p);
-              return undefined;
-            },
-          },
-        ];
-      },
-    },
     OWNER,
   );
 
@@ -274,7 +214,7 @@ function installInteractions(B) {
         const bp = B.blueprintAt(tx, ty, true);
         if (!bp || bp.faction !== 'colony') return null;
         const def = B.defOfBp(bp);
-        const name = bp.remove ? t('build.tt.removeFloor') : t(def?.nameKey || '');
+        const name = t(def?.nameKey || '');
         const need = B.needs(bp);
         if (need) {
           const give = p.carry && need.find(([id]) => id === p.carry.defId);
@@ -287,7 +227,7 @@ function installInteractions(B) {
               },
             };
           }
-          const [id, n] = need[0];
+          const [id] = need[0];
           const have = (bp.delivered?.[id] || 0);
           const total = bp.cost[id];
           return {
@@ -296,7 +236,6 @@ function installInteractions(B) {
             run: (gg, pawn) => {
               if (!manualDeliver(B, pawn, bp)) err(gg, pawn, bp.x, bp.y, 'build.err.noMaterial');
             },
-            _n: n,
           };
         }
         const block = B.blockedReason(bp);
@@ -335,73 +274,6 @@ function installInteractions(B) {
           },
           onRelease(gg, pawn) {
             if (pawn.job?.type === 'build_deconstruct' && pawn.job.manual) gg.jobs.endJob(pawn, 'cancelled');
-          },
-        };
-      },
-    },
-    OWNER,
-  );
-
-  // Починить (повреждено или «стёрто»)
-  I.add(
-    {
-      id: 'build:repair',
-      order: 17,
-      find(g, p, tx, ty) {
-        const b = g.map.buildingAt(tx, ty);
-        if (!b || !B.needsRepair(b)) return null;
-        const def = g.defs.buildings.get(b.defId);
-        const pct = Math.round(((b.hp ?? def?.hp ?? 100) / B.maxHp(b, def)) * 100);
-        return {
-          label: b.faded ? t('build.act.restore') : t('build.act.repair', { name: B.displayName(b), pct }),
-          x: b.x, y: b.y,
-          hold: true,
-          onHoldStart(gg, pawn) {
-            if (!gg.jobs.startManual(pawn, 'build_repair', { targetId: b.id, x: b.x, y: b.y })) err(gg, pawn, b.x, b.y, 'build.err.busy');
-          },
-          onRelease(gg, pawn) {
-            if (pawn.job?.type === 'build_repair' && pawn.job.manual) gg.jobs.endJob(pawn, 'cancelled');
-          },
-        };
-      },
-    },
-    OWNER,
-  );
-
-  // Запереть / отпереть дверь
-  I.add(
-    {
-      id: 'build:door',
-      order: 40,
-      find(g, p, tx, ty) {
-        const b = g.map.buildingAt(tx, ty);
-        const def = b && g.defs.buildings.get(b.defId);
-        if (!def || !(def.lockable || def.lockedOf)) return null;
-        if (Math.floor(p.x) === b.x && Math.floor(p.y) === b.y && def.lockable) return null; // стоим в проёме
-        return {
-          label: def.lockedOf ? t('build.act.unlock') : t('build.act.lock'),
-          x: b.x, y: b.y,
-          run: (gg) => B.setLocked(b, !def.lockedOf),
-        };
-      },
-    },
-    OWNER,
-  );
-
-  // Табличка памяти: прочитать
-  I.add(
-    {
-      id: 'build:plaque',
-      order: 45,
-      find(g, p, tx, ty) {
-        const b = g.map.buildingAt(tx, ty);
-        if (!b || !g.defs.buildings.get(b.defId)?.plaque) return null;
-        return {
-          label: b.fallen ? t('build.act.plaque', { name: b.fallen.name }) : t('build.act.plaqueEmpty'),
-          x: b.x, y: b.y,
-          run: (gg) => {
-            const text = b.fallen ? `${b.fallen.name}${b.fallen.years ? ', ' + b.fallen.years : ''} — ${b.fallen.epitaph || ''}` : t('build.plaque.blank');
-            gg.api.av.floatText(b.x + 0.5, b.y - 0.2, text, '#ffd27a');
           },
         };
       },
