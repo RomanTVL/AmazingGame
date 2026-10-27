@@ -52,7 +52,7 @@ const shot = async (name) => {
 const toScreen = (wx, wy) => g(([x, y]) => window.__game.camera.worldToScreen(x, y), [wx, wy]);
 
 try {
-  await page.goto(`http://127.0.0.1:${port}/index.html?seed=${SEED}`);
+  await page.goto(`http://127.0.0.1:${port}/index.html?seed=${SEED}&scenario=standard`); // полный состав, как в health.test (MVP-4: старт по умолчанию — «Трое выживших»)
   await page.waitForFunction(() => window.__game && window.__game.map && window.__game.renderer, null, { timeout: 15000 });
   await frames(20);
   // раненые: порезы, перелом, отсечённая рука; лежачий

@@ -67,7 +67,7 @@ async function dragCells(x0, y0, x1, y1) {
 }
 
 try {
-  await page.goto(`http://127.0.0.1:${port}/index.html?seed=${SEED}`);
+  await page.goto(`http://127.0.0.1:${port}/index.html?seed=${SEED}&scenario=standard`); // полный состав (MVP-4: старт по умолчанию — «Трое выживших»)
   await page.waitForFunction(() => window.__game && window.__game.map && window.__game.renderer, null, { timeout: 15000 });
   await frames(20);
   // день, без рейдов; свободное место рядом с лидером
