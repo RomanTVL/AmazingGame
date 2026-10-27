@@ -1,199 +1,77 @@
-// journey — состояние модуля (JSON, свой сериализатор 'journey') и общие помощники.
-import { RNG } from '../../core/rng.js';
+// journey — состояние (JSON, свой сериализатор 'journey') и общие помощники.
 import { TICKS_PER_HOUR } from '../../core/constants.js';
-import { findOption, actOfStep, rotSpeedOfAct, biomeOfStep } from './route.js';
+import { RNG } from '../../core/rng.js';
+import { optionOf, BOSS_STEP } from './route.js';
 
 export const STATE_VERSION = 1;
+export const hours = (h) => Math.round(h * TICKS_PER_HOUR);
 
 export function createState() {
   return {
     v: STATE_VERSION,
     route: null,
-    /** выбранные станции по шагам: [{step, id}] */
-    path: [],
-    step: 1,
-    stationId: null,
-    /** дикая стоянка (кончилось топливо): {reason, biome, legStep, n} */
-    wild: null,
-    phase: 'station', // 'station' | 'departing' | 'travel' | 'ended'
-    mapKind: 'station', // 'station' | 'travel' | 'wild'
-    next: null,
-    awaitingChoice: false,
-    departAt: 0,
-    trainPos: 0,
-    rotPos: 0,
-    rotInit: false,
-    rotOverTicks: 0,
-    rotLevel: 0,
-    rotFrontX: -1,
-    rotBeastAt: 0,
-    rotBehind: false,
-    rotNotified: {},
-    arrivedTick: 0,
+    /** номер текущей станции: 0 — стартовая, 1..4 */
+    step: 0,
+    /** выбранный вариант по шагам (индекс 0/1 или null) */
+    choice: [null, null, null, null],
+    phase: 'station', // 'station' | 'travel' | 'wild' | 'ended'
+    /** перегон: {to, t, len, halt: null|'ambush'|'regroup', haltUntil, ambushAt, ambushDone, forkAsked, startTick} */
     leg: null,
-    story: {
-      notes: {}, notesRead: 0, talked: 0, visitsDone: {}, queue: [], beatsDone: {}, journal: [],
-      firstLeaderId: 0, metLeaders: [], prevLeader: null, act: 1, spawnedNotes: {},
-    },
-    teller: { nextTick: 0, cd: {}, fired: {}, lastThreat: 0 },
+    arrivedTick: 0,
+    wildN: 0,
+    rot: { deadline: 0, level: 0, nextLevelAt: 0, nextBeastAt: 0, creep: 0 },
+    teller: { nextRaid: 0, nextIncident: 0, cd: {} },
+    boss: { at: 0, spawned: false, defeated: false },
     dialogs: [],
     uid: 1,
-    weather: { kind: 'clear', intensity: 0, untilTick: 0, nextTick: 0 },
-    tempMod: { value: 0, untilTick: 0, kind: null },
-    factions: { traders: 10, inquisition: 0, cult: -20, clans: 0 },
-    deaths: [],
-    boss: {},
-    stats: { legs: 0, versts: 0, travelTicks: 0, encounters: 0, incidents: 0, wildStops: 0, startTick: 0, joined: 0 },
-    ending: null,
+    victory: null,
     rng: null,
-    leftBehind: [],
-    pending: null,
-    eventMul: {},
-    trainSim: { speed: 0 },
+    stats: { legs: 0, ambushes: 0, wildStops: 0, incidents: 0, raids: 0, rotWaves: 0, startTick: 0 },
   };
 }
 
-/** Детерминированный поток модуля (состояние — в сейве). */
-export function journeyRng(J) {
-  if (!J._rng) {
-    J._rng = new RNG(1);
-    if (J.state.rng) J._rng.setState(J.state.rng);
-    else {
-      const f = J.game.rng.fork('journey:story');
-      J._rng.setState(f.getState());
-    }
-  }
-  return J._rng;
-}
-
-export function saveRng(J) {
-  if (J._rng) J.state.rng = J._rng.getState();
-}
-
-/** Текущая станция (вариант маршрута) или описание дикой стоянки. */
+/** Текущий вариант маршрута (станция, на которой стоим) или null (старт / дикая стоянка). */
 export function currentOption(J) {
-  const s = J.state;
-  if (s.wild) return null;
-  return findOption(s.route, s.stationId);
+  const S = J.S;
+  if (S.step < 1) return null;
+  return optionOf(S.route, S.step, S.choice[S.step - 1] ?? 0);
 }
 
-/** Публичное описание станции (для API и событий). */
+/** Вариант, к которому едем (если выбран). */
+export function targetOption(J) {
+  const S = J.S;
+  const to = S.leg?.to ?? S.step + 1;
+  const c = S.choice[to - 1];
+  return c === null || c === undefined ? null : optionOf(S.route, to, c);
+}
+
+export function optionName(J, opt) {
+  if (!opt) return J.game.t('journey.st.start');
+  return J.game.t(`journey.pname.${opt.type}`, { variant: opt.nameIdx });
+}
+
+/** Публичное описание станции (API getStation и события). */
 export function stationInfo(J, opt = currentOption(J)) {
   const game = J.game;
-  const s = J.state;
-  if (!opt) {
-    if (s.wild) {
-      return {
-        index: s.step, step: s.step, act: actOfStep(Math.max(1, s.step)), biome: s.wild.biome, type: 'wild', id: `wild${s.wild.n}`,
-        nameKey: 'journey.wild.name', name: game.t('journey.wild.name'), depot: false, trader: false, named: false, wild: true,
-        danger: 2, eventMul: 1, boss: null,
-      };
-    }
-    return { index: s.step || 1, step: s.step || 1, act: 1, biome: game.map?.biome || 'forest', type: 'halt', id: 'start', nameKey: 'station.start', name: game.t('station.start'), depot: false, named: false, danger: 1, eventMul: 1 };
+  const S = J.S;
+  if (S.phase === 'wild') {
+    return { index: S.step, id: `wild${S.wildN}`, nameKey: 'journey.wild.name', name: game.t('journey.wild.name'), type: 'wild', biome: game.map?.biome || 'forest', wild: true, boss: null };
   }
+  if (!opt) return { index: 0, id: 'start', nameKey: 'journey.st.start', name: game.t('journey.st.start'), type: 'start', biome: game.map?.biome || 'forest', boss: null };
   return {
-    index: opt.step,
-    step: opt.step,
-    act: opt.act,
-    biome: opt.biome,
-    type: opt.type,
-    id: opt.id,
-    uid: opt.uid,
-    named: opt.named,
-    nameKey: stationNameKey(opt),
-    name: stationName(J, opt),
-    typeName: game.t(`journey.type.${opt.type}`),
-    depot: !!opt.depot,
-    trader: !!opt.trader,
-    boss: opt.boss || null,
-    inquisition: !!opt.inquisition,
-    cult: !!opt.cult,
-    blackMarket: !!opt.blackMarket,
-    danger: opt.danger,
-    legLen: opt.legLen,
-    eventMul: s.eventMul[opt.id] ?? opt.eventMul ?? 1,
-    wild: false,
+    index: opt.step, id: opt.id, nameKey: `journey.pname.${opt.type}`, name: optionName(J, opt), type: opt.type,
+    typeName: game.t(`journey.type.${opt.type}`), biome: opt.biome, boss: opt.boss, danger: opt.danger,
   };
 }
 
-export function stationNameKey(opt) {
-  if (!opt) return 'station.start';
-  return opt.named ? `journey.st.${opt.step}` : `journey.pname.${opt.biome}`;
-}
-
-export function stationName(J, opt) {
-  if (!opt) return J.game.t('station.start');
-  if (opt.named) return J.game.t(`journey.st.${opt.step}`);
-  return J.game.t(`journey.pname.${opt.biome}`, { variant: opt.nameIdx });
-}
-
-/** Параметры сложности (journey дописывает их в game.defs.difficulties). */
 export function diff(J) {
-  const d = J.game.defs.difficulties.get(J.game.colony.difficulty) || J.game.defs.difficulties.get('normal');
-  return {
-    threat: d?.threat ?? 1,
-    incidentRate: d?.incidentRate ?? 1,
-    goodBias: d?.goodBias ?? 1,
-    rotMul: d?.rotMul ?? 1,
-    rotBeasts: d?.rotBeasts ?? true,
-  };
+  const d = J.game.defs.difficulties.get(J.game.colony?.difficulty) || J.game.defs.difficulties.get('normal');
+  return { threat: d?.threat ?? 1, rotMul: d?.rotMul ?? 1, incidentGood: d?.incidentGood ?? 1 };
 }
 
-/** Акт, в котором сейчас находится история (по шагу станции/цели перегона). */
-export function currentAct(J) {
-  const s = J.state;
-  if (s.phase === 'travel' || s.phase === 'departing') {
-    const to = findOption(s.route, s.leg?.toId);
-    if (to) return to.act;
-  }
-  return actOfStep(Math.max(1, s.step || 1));
-}
+export const isFinal = (J) => J.S.step >= BOSS_STEP;
 
-export function currentBiome(J) {
-  const s = J.state;
-  if (s.wild) return s.wild.biome;
-  if (s.phase === 'travel' || s.phase === 'departing') {
-    const to = findOption(s.route, s.leg?.toId);
-    const from = findOption(s.route, s.leg?.fromId);
-    if (to && from && to.biome !== from.biome) return (s.leg.traveled / Math.max(1, s.leg.length)) < 0.5 ? from.biome : to.biome;
-    if (to) return to.biome;
-  }
-  const o = currentOption(J);
-  return o?.biome || biomeOfStep(Math.max(1, s.step || 1));
-}
-
-/** Эффективная скорость Гнили, вёрст/ч: Vr(акт) × (1 − Память/250) × сложность. */
-export function rotSpeed(J, act = currentAct(J)) {
-  const mem = Number(J.game.api.health.getMemory()) || 0;
-  return rotSpeedOfAct(act) * (1 - Math.max(0, Math.min(100, mem)) / 250) * diff(J).rotMul;
-}
-
-export const hours = (h) => Math.round(h * TICKS_PER_HOUR);
-
-/** Живой лидер или null. */
-export const leaderOf = (J) => J.game.getLeader();
-
-/** Модуль train активен (предоставил getTrainState). */
-export const trainActive = (J) => J.game.providers.journey?.getTrainState === 'train';
-
-/** Лидер в кабине: API модуля train, иначе — внутри прямоугольника локомотива. */
-export function inCab(J, pawn = leaderOf(J)) {
-  if (!pawn) return false;
-  const game = J.game;
-  if (game.providers.journey?.isInCab === 'train') {
-    try {
-      return !!game.api.journey.isInCab(pawn);
-    } catch (err) {
-      game.error(err, 'journey.inCab');
-      return false;
-    }
-  }
-  const r = game.train?.locomotive?.rect;
-  return !!r && pawn.x >= r.x && pawn.y >= r.y && pawn.x < r.x + r.w && pawn.y < r.y + r.h;
-}
-
-/** Безопасный вызов чужого API: исключение → game.error, результат по умолчанию. */
-export function safeCall(J, where, fn, def = null) {
+export function safe(J, where, fn, def = null) {
   try {
     const v = fn();
     return v === undefined ? def : v;
@@ -203,11 +81,17 @@ export function safeCall(J, where, fn, def = null) {
   }
 }
 
-/** Функция модуля в чужом пространстве API, если она есть (не заглушка ядра и не отсутствует). */
-export function apiFn(J, ns, fn) {
-  const f = J.game.api[ns]?.[fn];
-  return typeof f === 'function' ? f : null;
+export function notify(J, key, vars, type = 'info', extra = {}) {
+  J.game.api.ui.notify(J.game.t(key, vars), { type, ...extra });
 }
 
-/** Предоставлена ли функция модулем-владельцем (не заглушкой ядра). */
-export const provided = (J, ns, fn) => !!J.game.providers[ns]?.[fn];
+export const raidActive = (J) => !!safe(J, 'isRaidActive', () => J.game.api.combat.isRaidActive?.(), false);
+
+/** Свой детерминированный поток journey (состояние — в сейве, S.rng): не сдвигает основной game.rng. */
+export function jrng(J) {
+  if (!J._rng) {
+    J._rng = new RNG(1);
+    J._rng.setState(J.S.rng ?? J.game.rng.fork('journey:story').getState());
+  }
+  return J._rng;
+}

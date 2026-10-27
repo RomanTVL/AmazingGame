@@ -25,7 +25,7 @@ const run = (g, n) => {
 };
 async function make(seed = 7) {
   const g = await createGame({ headless: true, seed });
-  startNewColony(g, { seed });
+  startNewColony(g, { seed, scenarioId: 'standard' }); // тесты написаны под полный состав (MVP-4: старт по умолчанию — «Трое выживших»)
   g.systems.setEnabled('combat', false); // без рейдов
   g.input.mouse.inside = true;
   return g;
