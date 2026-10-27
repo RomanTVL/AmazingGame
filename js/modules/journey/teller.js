@@ -155,7 +155,7 @@ export function onArrivalTeller(J, danger = 1) {
   const rng = jrng(J);
   const T = J.S.teller;
   if (J.S.step >= BOSS_STEP && J.S.phase === 'station') T.nextRaid = now + hours(9999);
-  else if (rng.chance(Math.min(0.85, 0.35 * danger * diff(J).threat))) T.nextRaid = now + hours(rng.range(1.5, 4));
+  else if (rng.chance(Math.min(0.85, 0.25 * danger * diff(J).threat))) T.nextRaid = now + hours(rng.range(1.5, 4));
   else T.nextRaid = now + hours(rng.range(48, 72));
   T.nextIncident = Math.min(T.nextIncident, now + hours(rng.range(4, 10)));
 }
@@ -198,7 +198,7 @@ export function tellerTick(J) {
     if (raidActive(J)) T.nextRaid = now + hours(2);
     else {
       const rng = jrng(J);
-      const points = Math.round(Math.min(cap(game), 20 + S.step * 12 + game.time.day * 3 + rng.int(0, 8)) * diff(J).threat);
+      const points = Math.round(Math.min(cap(game), 16 + S.step * 8 + game.time.day * 2 + rng.int(0, 6)) * diff(J).threat);
       const res = safe(J, 'spawnRaid', () => game.api.combat.spawnRaid({ points, faction: raidFaction(J) }), null);
       if (res) S.stats.raids++;
       T.nextRaid = now + hours(res ? rng.range(72, 120) : 3);

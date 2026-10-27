@@ -1,6 +1,6 @@
 // Сценарии старта (MVP: только «Трое выживших» — старт по умолчанию). Остальные 4 — после MVP.
 
-export const START_COAL = 72;
+export const START_COAL = 90;
 
 export const SCENARIOS = [
   {
@@ -15,11 +15,11 @@ export const SCENARIOS = [
     engine: 'steam',
     flags: {},
     apply(game, opts, ctx) {
-      // уголь — в тендер (на 2 перегона)
+      // уголь — в тендер (≈ на 2–3 перегона)
       const tender = ctx.train.carOfType('tender');
       const cells = tender ? ctx.train.interior(tender) : [];
       const c = cells[Math.floor(cells.length / 2)] || ctx.train.center();
-      if (c) game.items.spawn('coal', START_COAL, Math.floor(c.x), Math.floor(c.y));
+      if (c) game.items.spawn('coal', START_COAL, Math.floor(c.x), Math.floor(c.y)); // stackLimit 75 → две кучки рядом
     },
   },
 ];

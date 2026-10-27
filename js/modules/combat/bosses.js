@@ -85,6 +85,8 @@ export function installBosses(game, C) {
       }
     }
     if (b.slowUntil > game.time.tick) m *= 1.1;
+    // заклинания лидера по боссам — вчетверо сильнее (MVP-4: магия должна решать, мана — узкое место)
+    if (opts?.spell) m *= 4;
     return m;
   };
   /** Щит памяти: у поезда урон по поселенцам ниже, пока жив Сердце Гнили. */
@@ -263,9 +265,10 @@ function dragonTick(game, C, p, b, now, dt) {
   }
   if (now >= b.summonAt) {
     b.summonAt = now + secs(35);
-    if (countSummons(game, C, p, 'skeleton') + countSummons(game, C, p, 'skeleton_archer') < 4) {
-      summon(game, C, p, 'skeleton', b.phase, 3);
-      if (b.phase >= 2) summon(game, C, p, 'skeleton_archer', 1, 3);
+    // скелеты — только со второй фазы (MVP-4: баланс для троих)
+    if (b.phase >= 2 && countSummons(game, C, p, 'skeleton') + countSummons(game, C, p, 'skeleton_archer') < 2) {
+      summon(game, C, p, 'skeleton', b.phase - 1, 3);
+      if (b.phase >= 3) summon(game, C, p, 'skeleton_archer', 1, 3);
       game.api.vision.report(game.t('combat.boss.bone_dragon.summon'), { type: 'bad', x: p.x, y: p.y });
     }
   }

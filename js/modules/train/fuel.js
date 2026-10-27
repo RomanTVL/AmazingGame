@@ -5,11 +5,13 @@ import { ops } from './state.js';
 
 /** Сколько «единиц топлива» даёт штука: уголь — 1, дрова — 1/3. */
 export const FUEL_VALUE = { coal: 1, wood: 1 / 3 };
-/** Расход в единицах за игровой час хода (перегон 3–6 ч → 24–48 угля). */
-export const BURN_PER_HOUR = 8;
+/** Расход в единицах за игровой час хода (перегон 3–6 ч → 18–36 угля). */
+export const BURN_PER_HOUR = 6;
 /** Средний перегон, ч (для подсказки «хватит на N перегонов»). */
 export const AVG_LEG_HOURS = 4.5;
 export const FUEL_MAX = 150;
+/** Топлива в тендере меньше — поселенцы в первую очередь носят уголь в тендер. */
+export const FUEL_LOW = 60;
 
 /** Паровоз ли (рунный двигатель MVP топлива не тратит). */
 export function usesFuel(game) {

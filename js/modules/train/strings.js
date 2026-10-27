@@ -8,7 +8,7 @@ export function registerStrings(game) {
       scen: {
         three: {
           name: 'Трое выживших',
-          desc: 'Маг-проводник и двое уцелевших. Паровоз, тендер, склад и жилой вагон. Угля — на два перегона, еды — дней на десять.',
+          desc: 'Маг-проводник и двое уцелевших. Паровоз, тендер, склад и жилой вагон. Угля — перегона на три, еды — дней на десять.',
         },
       },
       horn: {
@@ -38,8 +38,10 @@ export function registerStrings(game) {
         none: 'Топлива нет!',
         out: 'Топливо кончилось — поезд встаёт.',
         rune: 'Рунный двигатель',
+        need: 'на перегон ~{need}',
       },
       board: { job: 'Бежит к поезду' },
+      job: { haulFuel: 'Несёт уголь в тендер' },
       hud: { boarding: 'Посадка: {sec} с · не сели: {n}' },
       thought: { left_friend: 'Мы бросили своего' },
     },
@@ -52,7 +54,7 @@ export function registerStrings(game) {
       scen: {
         three: {
           name: 'Three survivors',
-          desc: 'A conductor-mage and two survivors. Steam engine, tender, storage and living car. Coal for two legs, food for about ten days.',
+          desc: 'A conductor-mage and two survivors. Steam engine, tender, storage and living car. Coal for about three legs, food for about ten days.',
         },
       },
       horn: {
@@ -82,8 +84,10 @@ export function registerStrings(game) {
         none: 'No fuel!',
         out: 'Out of fuel — the train stops.',
         rune: 'Rune engine',
+        need: 'leg needs ~{need}',
       },
       board: { job: 'Running to the train' },
+      job: { haulFuel: 'Carrying coal to the tender' },
       hud: { boarding: 'Boarding: {sec} s · missing: {n}' },
       thought: { left_friend: 'We abandoned one of ours' },
     },

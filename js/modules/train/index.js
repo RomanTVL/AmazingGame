@@ -3,7 +3,8 @@
  * отправление, двойной — «К оружию!»), отставшие, API поезда. Владелец: js/modules/train/** .
  * Контракт ядра: docs/ARCHITECTURE.md (§4 «Новая игра», §9 «Поезд», §13 «Действия E», §18 «API»).
  *
- * Файлы MVP: scenario.js (сценарии), defs.js (уголь, пласт, тендер, звуки), fuel.js (топливо), horn.js (гудок, посадка,
+ * Файлы MVP: scenario.js (сценарии), defs.js (уголь, пласт, тендер, звуки), fuel.js (топливо), haul.js (подноска угля
+ * в тендер, когда его мало), horn.js (гудок, посадка,
  * отправление, отставшие, окно подтверждения), strings.js; state.js — помощники (на борту, в кабине…).
  * Черновики на после MVP (не подключены): machine.js, stoke.js, constants.js — котёл, топка, регулятор, рунный двигатель,
  * депо, остальные сценарии.
@@ -14,13 +15,14 @@
  *          'journey:leftBehind' {pawn, station}, 'train:outOfFuel' {}.
  * API: game.api.journey (от train): getTrainState(), getFuel(), isInCab(pawn).
  *      game.api.train: startBoarding(opts), cancelBoarding(), depart({force}), confirmDepart(go), missing(), isAboard(p),
- *      fuelUnits(), usesFuel(), leftBehind().
+ *      fuelUnits(), usesFuel(), burnPerHour(), leftBehind().
  */
 import { registerDefs } from './defs.js';
 import { registerStrings } from './strings.js';
 import { registerScenarios } from './scenario.js';
 import { ops, isAboard } from './state.js';
-import { fuelUnits, burnTick, usesFuel, legsLeft, FUEL_MAX } from './fuel.js';
+import { fuelUnits, burnTick, usesFuel, legsLeft, FUEL_MAX, BURN_PER_HOUR } from './fuel.js';
+import { registerFuelHauling } from './haul.js';
 import {
   isInCab, missingPawns, startBoarding, cancelBoarding, depart, confirmDepart, boardingTick, hornInput, registerBoardingAI,
   registerDepartPanel, resetHornRuntime,
@@ -33,6 +35,7 @@ export function register(game) {
   registerDefs(game);
   registerScenarios(game);
   registerBoardingAI(game);
+  registerFuelHauling(game);
   registerDepartPanel(game);
 
   const R = { fuelTick: -1e9, fuel: 0 };
@@ -126,6 +129,7 @@ export function register(game) {
     isAboard: (p) => isAboard(game, p),
     fuelUnits: () => (game.train?.stamped ? fuelUnits(game) : 0),
     usesFuel: () => usesFuel(game),
+    burnPerHour: () => (usesFuel(game) ? BURN_PER_HOUR : 0),
     leftBehind: () => (game.train?.ops?.leftBehind || []).slice(),
   }, OWNER);
 
@@ -149,7 +153,10 @@ export function register(game) {
         const n = cachedFuel();
         const col = n <= 0 ? T.bad : n < 30 ? T.warn : T.text;
         ui.text(g.t('train.fuel.hud', { n }), x + 10, y + 5, { size: 13, bold: true, color: col });
-        ui.text(n > 0 ? g.t('train.fuel.legs', { legs: legsLeft(n) }) : g.t('train.fuel.none'), x + w - 10, y + 6, { size: 12, color: T.dim, align: 'right' });
+        let need = null;
+        if (typeof g.api.journey.fuelNeed === 'function') need = g.api.journey.fuelNeed();
+        const right = need ? g.t('train.fuel.need', { need }) : n > 0 ? g.t('train.fuel.legs', { legs: legsLeft(n) }) : g.t('train.fuel.none');
+        ui.text(right, x + w - 10, y + 6, { size: 12, color: need && n < need ? T.warn : T.dim, align: 'right' });
       } else ui.text(g.t('train.fuel.rune'), x + 10, y + 5, { size: 13, color: T.accent });
       if (B) {
         y += 24;

@@ -7,6 +7,7 @@ import { optionOf, TYPE_COLOR, STEP_BIOME, STEPS } from './route.js';
 import { rotHoursLeft } from './rot.js';
 import { choose, isMoving } from './travel.js';
 import { answerDialog } from './teller.js';
+import { leaderNeedsLine } from './leader.js';
 
 const OWNER = 'journey';
 
@@ -180,7 +181,8 @@ export function registerUI(J) {
           col2 = T.bad;
         }
         if (S.step >= STEPS && S.phase === 'station') {
-          line2 = t('journey.hud.boss');
+          const bl = (S.boss.at - g.time.tick) / 600;
+          line2 = !S.boss.spawned && bl > 0 ? t('journey.hud.bossIn', { h: Math.ceil(bl) }) : t('journey.hud.boss');
           col2 = T.bad;
         }
       }
@@ -188,6 +190,23 @@ export function registerUI(J) {
       if (line2) ui.text(line2, x + w - 12, y + (S.phase === 'travel' ? 8 : 28), { size: 12, color: col2, align: 'right' });
       if (S.phase !== 'travel') ui.text(t('journey.hud.keys'), x + 12, y + 29, { size: 11, color: T.dim });
       return h + 6;
+    },
+  }, OWNER);
+
+  // ---------------- голод/усталость лидера ----------------
+  game.ui.registerHud({
+    id: 'journey:leaderNeeds',
+    slot: 'bottom-left',
+    order: 5,
+    height: (g) => (leaderNeedsLine(g) ? 30 : 0),
+    draw(ctx, g, ui, box) {
+      const l = leaderNeedsLine(g);
+      if (!l) return 0;
+      const txt = t(l.key);
+      const w = Math.max(260, ui.measure(txt, 13, true) + 24);
+      ui.panel(box.x, box.y, w, 26, { accent: l.bad ? ui.theme.bad : ui.theme.warn });
+      ui.text(txt, box.x + 12, box.y + 6, { size: 13, bold: true, color: l.bad ? ui.theme.bad : ui.theme.warn });
+      return 30;
     },
   }, OWNER);
 

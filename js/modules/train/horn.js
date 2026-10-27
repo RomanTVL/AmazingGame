@@ -58,7 +58,16 @@ export function startBoarding(game, opts = {}) {
   if (!O || !game.map) return false;
   if (!opts.auto && !canDepart(game)) {
     const tr = typeof game.api.journey.isTravelling === 'function' && game.api.journey.isTravelling();
-    notify(game, tr ? 'train.horn.travelling' : 'train.horn.cantDepart', {}, 'bad');
+    let hint = null;
+    if (!tr && typeof game.api.journey.departHint === 'function') {
+      try {
+        hint = game.api.journey.departHint();
+      } catch (err) {
+        game.error(err, 'train:departHint');
+      }
+    }
+    if (hint) game.api.ui.notify(hint, { type: 'bad' });
+    else notify(game, tr ? 'train.horn.travelling' : 'train.horn.cantDepart', {}, 'bad');
     return false;
   }
   const now = game.time.tick;
@@ -176,6 +185,14 @@ export function boardingTick(game) {
     return;
   }
   B.allAt = -1;
+  // гудок будит: спящие снаружи встают и бегут к поезду
+  if ((now - B.startTick) % 60 === 0) {
+    for (const p of missing) {
+      if (!(p.asleep || p.job?.type === 'sleep' || p.job?.type === 'mind_sleep')) continue;
+      if (p.job) game.jobs.endJob(p, 'cancelled');
+      p.asleep = false;
+    }
+  }
   if (now >= B.untilTick && !O.confirm) openConfirm(game, missing);
 }
 

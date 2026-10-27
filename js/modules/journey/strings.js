@@ -24,6 +24,20 @@ export function registerStrings(game) {
         name: 'Дикая стоянка',
         stop: 'Топливо кончилось — поезд встал на дикой стоянке. Добудьте уголь или дрова (в тендер) и дайте гудок.',
       },
+      depart: {
+        noFuel: 'Нет угля! В тендер нужно топливо (на перегон ~{need}). Добудьте уголь или дрова.',
+        needFuel: 'Угля мало: {have} из ~{need} на остаток перегона. Сперва заполните тендер.',
+      },
+      leader: {
+        hungry: '{name} голоден. Подойдите к еде и нажмите E — или постойте, сам поест.',
+        starving: '{name} истощён от голода! Срочно поесть.',
+        tired: '{name} устал. E у кровати — «Лечь спать», или постойте — приляжет.',
+        exhausted: '{name} валится с ног!',
+        autoEat: '{name} садится поесть.',
+        autoSleep: '{name} прилёг отдохнуть.',
+        hudHungry: 'Лидер голоден — E у еды',
+        hudTired: 'Лидер устал — E у кровати',
+      },
       route: {
         title: 'Карта маршрута',
         step: 'Станция {n}',
@@ -41,6 +55,7 @@ export function registerStrings(game) {
         ambush: 'Засада! Завал на путях — поезд встал. К оружию!',
         regroup: 'Засада отбита. Все в вагоны!',
         resume: 'Поезд трогается.',
+        coast: 'Уголь кончился снова — дотягиваем до станции на остатках пара.',
         arrived: 'Прибыли: {name} ({type}).',
       },
       rot: {
@@ -49,7 +64,7 @@ export function registerStrings(game) {
       },
       boss: {
         name: 'Костяной дракон',
-        warn: 'Кости под насыпью шевелятся… Здесь логово Костяного дракона.',
+        warn: 'Кости под насыпью шевелятся… Здесь логово Костяного дракона. Несколько часов — перевяжите раны и приготовьтесь.',
       },
       hud: {
         travel: 'В пути → ст. {n}: {name}',
@@ -60,6 +75,7 @@ export function registerStrings(game) {
         rotIn: 'Гниль через {h} ч',
         rotHere: 'Гниль! ур. {level}',
         boss: 'Костяной дракон!',
+        bossIn: 'Дракон через {h} ч',
         victory: 'Победа! Дракон повержен.',
         keys: '[H] в кабине — гудок · [F4] маршрут',
       },
@@ -128,6 +144,20 @@ export function registerStrings(game) {
         name: 'Wild stop',
         stop: 'Out of fuel — the train stopped in the wild. Get coal or firewood (into the tender) and sound the horn.',
       },
+      depart: {
+        noFuel: 'No coal! The tender needs fuel (the leg needs ~{need}). Mine coal or cut firewood.',
+        needFuel: 'Too little coal: {have} of ~{need} for the rest of the leg. Fill the tender first.',
+      },
+      leader: {
+        hungry: '{name} is hungry. Walk to food and press E — or stand still and he will eat.',
+        starving: '{name} is starving! Eat now.',
+        tired: '{name} is tired. E at a bed — «Sleep», or stand still to rest.',
+        exhausted: '{name} is about to collapse!',
+        autoEat: '{name} sits down to eat.',
+        autoSleep: '{name} lies down to rest.',
+        hudHungry: 'Leader is hungry — E at food',
+        hudTired: 'Leader is tired — E at a bed',
+      },
       route: {
         title: 'Route map',
         step: 'Station {n}',
@@ -145,6 +175,7 @@ export function registerStrings(game) {
         ambush: 'Ambush! The track is blocked — the train stopped. To arms!',
         regroup: 'Ambush repelled. Everyone back aboard!',
         resume: 'The train moves on.',
+        coast: 'Out of coal again — coasting to the station on the last of the steam.',
         arrived: 'Arrived: {name} ({type}).',
       },
       rot: {
@@ -153,7 +184,7 @@ export function registerStrings(game) {
       },
       boss: {
         name: 'Bone Dragon',
-        warn: 'Bones stir under the embankment… This is the Bone Dragon\'s lair.',
+        warn: 'Bones stir under the embankment… This is the Bone Dragon\'s lair. You have a few hours — tend the wounds and get ready.',
       },
       hud: {
         travel: 'Travelling → st. {n}: {name}',
@@ -164,6 +195,7 @@ export function registerStrings(game) {
         rotIn: 'Rot in {h} h',
         rotHere: 'Rot! lvl {level}',
         boss: 'Bone Dragon!',
+        bossIn: 'Dragon in {h} h',
         victory: 'Victory! The dragon is slain.',
         keys: '[H] in cab — horn · [F4] route',
       },

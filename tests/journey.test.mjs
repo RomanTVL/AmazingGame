@@ -105,9 +105,11 @@ console.log('3. Гниль');
   ok(adv[0] === 1 && g.api.journey.getState().rotLevel === 1, 'срок вышел — Гниль пришла (уровень 1)');
   ok(terrainCount(g, 'rot') > 0, `земля чернеет (${terrainCount(g, 'rot')} клеток Гнили)`);
   const rot1 = terrainCount(g, 'rot');
+  const beasts = [];
+  g.events.on('combat:raidStarted', (e) => beasts.push(e.faction), 'test');
   run(g, 7 * H);
   ok(g.api.journey.getState().rotLevel >= 2 && terrainCount(g, 'rot') > rot1, 'Гниль ползёт дальше');
-  ok(enemies(g).some((p) => p.defId === 'rot_wolf' || p.enemyId === 'rot_wolf' || p.enemyFaction === 'rot_beasts'), 'пришли гнилые волки');
+  ok(beasts.includes('rot_beasts'), `пришли гнилые волки (${beasts})`);
   ok(g.errors.length === 0, `без ошибок (${g.errors.map((e) => e.message)})`);
 }
 
@@ -225,7 +227,8 @@ console.log('6. Четыре станции → победа');
   ok(seenBiomes.has('forest') && seenBiomes.has('ash'), 'побывали в лесу и пустоши');
   ok(!g.api.journey.canDepart(), 'со станции 4 дальше не уехать');
   // дракон
-  until(g, () => g.entities.listKind('pawn').some((p) => p.boss?.id === 'bone_dragon'), 2 * H);
+  ok(Jx(g).S.boss.at - g.time.tick > 5 * H, 'дракон — через несколько часов (время перевязать раны)');
+  until(g, () => g.entities.listKind('pawn').some((p) => p.boss?.id === 'bone_dragon'), 7 * H);
   const dragon = g.entities.listKind('pawn').find((p) => p.boss?.id === 'bone_dragon');
   ok(!!dragon, 'Костяной дракон появился');
   if (dragon) g.api.health.kill(dragon, 'test', {});
@@ -261,6 +264,25 @@ console.log('7. Сохранение');
   until(g2, () => J2.S.phase !== 'travel', 8000, true);
   ok(J2.S.phase === 'station' && J2.S.step === 1, 'после загрузки поезд доехал');
   ok(g2.errors.length === 0 && g.errors.length === 0, `без ошибок (${[...g.errors, ...g2.errors].map((e) => e.message)})`);
+}
+
+// ---------------------------------------------------------------- 8. лидер игрока: голод и усталость
+console.log('8. Лидер: голод и усталость');
+{
+  const g = await make(17);
+  g.systems.setEnabled('combat', false);
+  const L = g.getLeader();
+  ok(L.controlled === 'player', 'лидер под управлением игрока');
+  L.needs.food = 0.22;
+  run(g, 400);
+  ok(g.log.some((l) => l.text === g.t('journey.leader.hungry', { name: L.name })), 'предупреждение «лидер голоден»');
+  ok(g.ui.hud.has('journey:leaderNeeds'), 'HUD-подсказка о голоде');
+  ok(L.needs.food > 0.5 || ['eat', 'mind_eat'].includes(L.job?.type), `стоит без дела — сам поел (${L.needs.food.toFixed(2)}, ${L.job?.type})`);
+  L.needs.rest = 0.15;
+  run(g, 600);
+  ok(g.log.some((l) => l.text === g.t('journey.leader.tired', { name: L.name })), 'предупреждение «лидер устал»');
+  ok(L.job?.type === 'sleep' || L.asleep || L.needs.rest > 0.3, `стоит без дела — прилёг (${L.job?.type})`);
+  ok(g.errors.length === 0, `без ошибок (${g.errors.map((e) => e.message)})`);
 }
 
 console.log(`${checks - fails}/${checks} проверок`);

@@ -45,8 +45,8 @@ function spawnBeasts(J) {
   const game = J.game;
   const R = J.S.rot;
   const cap = 20 + 22 * game.colonists().filter((p) => !p.downed).length;
-  // одиночные волки; стаей — когда Гниль стоит здесь уже ~2,5 суток
-  const points = Math.round(Math.min(cap, R.level >= 10 ? 44 : 22) * diff(J).threat);
+  // по одному волку, но всё чаще (уровень Гнили растёт)
+  const points = Math.round(Math.min(cap, 22) * diff(J).threat);
   const res = safe(J, 'spawnRaid', () => game.api.combat.spawnRaid({ points, faction: 'rot_beasts', edge: 'west' }), null);
   if (res) {
     J.S.stats.rotWaves++;
@@ -80,6 +80,6 @@ export function rotTick(J) {
   }
   if (now >= R.nextBeastAt) {
     if (raidActive(J) || !spawnBeasts(J)) R.nextBeastAt = now + hours(1);
-    else R.nextBeastAt = now + hours(Math.max(8, 16 - R.level / 2));
+    else R.nextBeastAt = now + hours(Math.max(10, 18 - R.level / 2));
   }
 }

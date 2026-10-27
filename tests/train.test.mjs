@@ -36,6 +36,7 @@ async function make(seed = 21, opts = {}) {
   return g;
 }
 const T = (g) => g.api.train;
+const Jx = (g) => g.api.journey.debugState();
 const toCab = (g, p = g.getLeader()) => {
   const r = g.train.locomotive.rect;
   g.entities.setPosition(p, r.x + 2.5, r.y + 3.5);
@@ -62,15 +63,15 @@ console.log('1. Сценарий «Трое выживших»');
   ok(g.colonists().length === 3 && g.colonists().filter((p) => p.isLeader).length === 1, 'лидер + 2 спутника');
   ok(g.train.cars.map((c) => c.type).join(',') === 'residential,storage,tender,locomotive', `состав: ${g.train.cars.map((c) => c.type)}`);
   ok(g.getScenario().engine === 'steam' && T(g).usesFuel(), 'паровоз (тратит топливо)');
-  ok(T(g).fuelUnits() === 72 && g.items.count('coal') === 72, `уголь в тендере: ${T(g).fuelUnits()}`);
+  ok(T(g).fuelUnits() === 90 && g.items.count('coal') === 90, `уголь в тендере: ${T(g).fuelUnits()}`);
   const food = g.items.count('ration') * 0.8 + g.items.count('berries') * 0.1;
   ok(food >= 3 * 1.5 * 9.5, `еды ≈ на 10 дней для троих (${food.toFixed(0)} сытости)`);
   const tz = [...g.zones.zones.values()].find((z) => z.data?.carId === g.train.carOfType('tender').id);
   ok(tz && tz.filter?.items?.includes('coal') && !g.zones.accepts(tz, 'ration') && tz.priority === 4, 'зона тендера — только топливо, высокий приоритет');
   ok(g.defs.buildings.has('coal_seam') && g.defs.items.has('coal'), 'уголь и угольный пласт');
   const s = g.api.journey.getTrainState();
-  ok(s.engine === 'steam' && s.moving === false && s.fuel === 72, 'getTrainState');
-  ok(g.api.journey.getFuel().amount === 72, 'getFuel');
+  ok(s.engine === 'steam' && s.moving === false && s.fuel === 90, 'getTrainState');
+  ok(g.api.journey.getFuel().amount === 90, 'getFuel');
   const g2 = await make(21, { scenarioId: 'standard' });
   ok(!g2.api.train.usesFuel() && g2.errors.length === 0, 'запасной сценарий standard (рунный) работает без топлива');
 }
@@ -157,7 +158,7 @@ console.log('5. Уголь в пути и дикая стоянка');
   ok(T(g).depart({ force: true }), 'отправление');
   run(g, H);
   const f1 = T(g).fuelUnits();
-  ok(f1 < f0 && f0 - f1 >= 6 && f0 - f1 <= 10, `в пути уголь расходуется (${f0} → ${f1} за час)`);
+  ok(f1 < f0 && f0 - f1 >= 5 && f0 - f1 <= 7, `в пути уголь расходуется (${f0} → ${f1} за час)`);
   ok(g.api.journey.getTrainState().moving, 'getTrainState.moving');
   // оставить чуть-чуть
   for (const it of g.entities.listKind('item').filter((i) => i.defId === 'coal')) g.items.take(it, it.count);
@@ -175,13 +176,42 @@ console.log('5. Уголь в пути и дикая стоянка');
   ok(st.leg && st.leg.t >= legT, 'перегон не потерян');
   ok(g.entities.listKind('building').some((b) => b.defId === 'coal_seam'), 'рядом есть уголь');
   // дрова как топливо: 3 полена = 1 единица
-  const c2 = g.train.interior(tender)[4];
+  for (const it of g.entities.listKind('item').filter((i) => i.defId === 'coal' || i.defId === 'wood')) g.items.take(it, it.count);
+  ok(!g.api.journey.canDepart() && /угл/i.test(g.api.journey.departHint() || ''), `без угля ехать нельзя (${g.api.journey.departHint()})`);
+  const tender2 = g.train.carOfType('tender');
+  const c2 = g.train.interior(tender2)[4];
+  const c3 = g.train.interior(tender2)[1];
   g.items.spawn('wood', 30, c2.x, c2.y);
   ok(T(g).fuelUnits() === 10, `дрова в тендере — топливо (${T(g).fuelUnits()})`);
-  g.items.spawn('coal', 60, c.x, c.y);
-  ok(g.api.journey.canDepart() && T(g).depart({ force: true }), 'топливо есть — снова в путь');
+  ok(!g.api.journey.canDepart() && g.api.journey.fuelNeed() > 10, `с дикой стоянки — только с запасом на остаток перегона (нужно ${g.api.journey.fuelNeed()})`);
+  g.items.spawn('coal', 60, c3.x, c3.y);
+  ok(g.api.journey.canDepart() && T(g).depart({ force: true }), `топливо есть — снова в путь (${T(g).fuelUnits()} / ${g.api.journey.fuelNeed()}, ${g.api.journey.departHint()})`);
   ok(g.api.journey.getState().phase === 'travel' && g.api.journey.getState().leg.t === st.leg.t, 'перегон продолжается с того же места');
+  // уголь снова кончился на том же перегоне — второй дикой стоянки нет, дотягиваем
+  for (const it of g.entities.listKind('item').filter((i) => i.defId === 'coal' || i.defId === 'wood')) g.items.take(it, it.count);
+  const wild0 = Jx(g).S.wildN;
+  run(g, 600);
+  ok(Jx(g).S.wildN === wild0 && g.api.journey.getState().phase === 'travel' && g.api.journey.isMoving(), 'на том же перегоне — без второй дикой стоянки');
   ok(g.errors.length === 0, `без ошибок (${g.errors.map((e) => e.message)})`);
+}
+
+// ---------------------------------------------------------------- 5б. уголь носят в тендер
+console.log('5б. Подноска угля в тендер');
+{
+  const g = await make(27);
+  g.systems.setEnabled('combat', false);
+  for (const it of g.entities.listKind('item').filter((i) => i.defId === 'coal')) g.items.take(it, it.count);
+  const c = g.train.center();
+  const s = g.map.randomPassableNear(g.rng, c.x + 6, c.y + 9, 4, 60, (x, y) => !g.train.carAt(x, y));
+  g.items.spawn('coal', 40, s.x, s.y);
+  ok(T(g).fuelUnits() === 0, 'тендер пуст, уголь лежит на земле');
+  run(g, 3 * H);
+  ok(T(g).fuelUnits() >= 30, `поселенцы перенесли уголь в тендер (${T(g).fuelUnits()})`);
+  // без угля — гудок с подсказкой
+  for (const it of g.entities.listKind('item').filter((i) => i.defId === 'coal' || i.defId === 'wood')) g.items.take(it, it.count);
+  run(g, 60);
+  toCab(g);
+  ok(!T(g).startBoarding() && g.log.some((l) => /Нет угля/.test(l.text)), 'без угля посадки нет — подсказка «Нет угля»');
 }
 
 // ---------------------------------------------------------------- 6. сохранение

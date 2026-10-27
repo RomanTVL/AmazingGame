@@ -197,7 +197,7 @@ export function decorateStation(game, type, rng) {
     out.coal += coalCluster(game, rng, rng.int(3, 5));
     out.caches += looseCache(game, rng, 'cache_supplies');
   } else {
-    out.coal += coalCluster(game, rng, rng.int(2, 3));
+    out.coal += coalCluster(game, rng, rng.int(4, 6));
     out.caches += looseCache(game, rng, 'cache_supplies');
   }
   return out;

@@ -10,11 +10,47 @@ import { onArrivalTeller } from './teller.js';
 
 const REGROUP_TICKS = 900;
 
-export function canDepart(J) {
+/** Сколько топлива нужно на (оставшийся) перегон, или null (не паровоз / ехать некуда). */
+export function fuelNeed(J) {
   const S = J.S;
-  if (!J.game.train?.stamped || !S.route) return false;
-  if (S.phase === 'station') return !isFinal(J);
-  return S.phase === 'wild';
+  const game = J.game;
+  const bph = safe(J, 'burnPerHour', () => game.api.train.burnPerHour?.() ?? 0, 0);
+  if (!bph || !S.route) return null;
+  let ticks = 0;
+  if (S.phase === 'station' && !isFinal(J)) ticks = S.route.legs[S.step];
+  else if ((S.phase === 'wild' || S.phase === 'travel') && S.leg) ticks = S.leg.len - S.leg.t;
+  else return null;
+  return Math.ceil((ticks / hours(1)) * bph);
+}
+
+/** Почему нельзя ехать (null — можно). */
+export function departBlock(J) {
+  const S = J.S;
+  const game = J.game;
+  if (!game.train?.stamped || !S.route) return 'none';
+  if (S.phase === 'station' && isFinal(J)) return 'final';
+  if (S.phase !== 'station' && S.phase !== 'wild') return 'travelling';
+  const need = fuelNeed(J);
+  if (need !== null) {
+    const fuel = safe(J, 'fuelUnits', () => game.api.train.fuelUnits?.() ?? 0, 0);
+    if (fuel < 1) return 'noFuel';
+    // с дикой стоянки — только с запасом на весь остаток перегона (вторая дикая стоянка на перегоне не нужна)
+    if (S.phase === 'wild' && fuel < need) return 'needFuel';
+  }
+  return null;
+}
+
+export function departHint(J) {
+  const b = departBlock(J);
+  const t = (k, v) => J.game.t(k, v);
+  if (b === 'noFuel') return t('journey.depart.noFuel', { need: fuelNeed(J) ?? 0 });
+  if (b === 'needFuel') return t('journey.depart.needFuel', { need: fuelNeed(J) ?? 0, have: safe(J, 'fuel', () => J.game.api.train.fuelUnits?.() ?? 0, 0) });
+  if (b === 'final') return t('journey.route.final');
+  return null;
+}
+
+export function canDepart(J) {
+  return departBlock(J) === null;
 }
 
 export const isTravelling = (J) => J.S.phase === 'travel';
@@ -42,7 +78,7 @@ export function depart(J) {
     const p = Math.min(0.7, (0.12 + 0.06 * to) * diff(J).threat); // «изредка»
     S.leg = {
       to, t: 0, len, halt: null, haltUntil: 0, ambushAt: rng.chance(p) ? Math.floor(len * rng.range(0.2, 0.6)) : -1, ambushDone: false,
-      forkAsked: false, startTick: game.time.tick,
+      forkAsked: false, startTick: game.time.tick, wilds: 0,
     };
   }
   game.events.emit('journey:departing', { station: from });
@@ -96,7 +132,7 @@ function ambush(J) {
   const rng = jrng(J);
   const faction = L.to <= 2 ? rng.pick(['bandits', 'rot_beasts']) : rng.pick(['bandits', 'cultists', 'undead']);
   const cap = 20 + 22 * game.colonists().filter((p) => !p.downed).length;
-  const points = Math.round(Math.min(cap, 20 + L.to * 8) * diff(J).threat);
+  const points = Math.round(Math.min(cap, 18 + L.to * 5) * diff(J).threat);
   const res = safe(J, 'spawnRaid', () => game.api.combat.spawnRaid({ points, faction, ambushTrain: true }), null);
   S.stats.ambushes++;
   game.api.av.play('journey_brakes', {});
@@ -172,7 +208,7 @@ export function arrive(J) {
   decorateStation(game, opt.type, game.rng.fork(`journey:deco:${to}:${opt.type}`));
   startRotTimer(J, rotHoursFor(J, to));
   if (opt.boss) {
-    S.boss = { at: game.time.tick + hours(1), spawned: false, defeated: false };
+    S.boss = { at: game.time.tick + hours(6), spawned: false, defeated: false }; // 6 ч — перевязать раны и приготовиться
     notify(J, 'journey.boss.warn', {}, 'danger');
     game.api.ui.setObjective('journey', game.t('journey.obj.boss'));
   } else game.api.ui.setObjective('journey', game.t('journey.obj.station', { n: to, left: 4 - to }));
@@ -188,6 +224,12 @@ export function wildStop(J) {
   const game = J.game;
   const S = J.S;
   if (S.phase !== 'travel' || !S.leg) return false;
+  if (S.leg.wilds >= 1) {
+    // на этом перегоне уже стояли — дотягиваем на остатках пара (без новой дикой стоянки)
+    notify(J, 'journey.travel.coast', {}, 'bad');
+    return false;
+  }
+  S.leg.wilds = (S.leg.wilds || 0) + 1;
   S.phase = 'wild';
   S.wildN++;
   S.stats.wildStops++;
@@ -195,8 +237,9 @@ export function wildStop(J) {
   const biome = targetOption(J)?.biome || STEP_BIOME[S.leg.to] || 'forest';
   change(J, { biome, stationIndex: 500 + S.wildN, w: 120, h: 80 }, 'wild');
   decorateStation(game, biome === 'ash' ? 'ash' : 'forest', game.rng.fork(`journey:deco:wild:${S.wildN}`));
-  startRotTimer(J, 20 * diff(J).rotMul);
-  onArrivalTeller(J, 1);
+  startRotTimer(J, 30 * diff(J).rotMul);
+  // на дикой стоянке рейда по прибытии нет
+  S.teller.nextRaid = Math.max(S.teller.nextRaid, game.time.tick + hours(30));
   game.events.emit('journey:arrived', { station: stationInfo(J) });
   notify(J, 'journey.wild.stop', {}, 'danger');
   game.api.ui.setObjective('journey', game.t('journey.obj.wild'));

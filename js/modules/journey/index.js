@@ -16,14 +16,16 @@
  * СОБЫТИЯ: 'journey:departing' {station}, 'journey:travelling' {from, to}, 'journey:arriving' {station},
  *          'journey:arrived' {station}, 'journey:incident' {id}, 'journey:rotAdvance' {level}, 'game:victory' {ending, stats}.
  * API (game.api.journey, от journey): getBiome, getStation, isTravelling, depart, getAmbientTemp; добавлено — canDepart,
- *   isMoving, getRoute, choose(step, idx), answer(dialogId?, accept), getState, debugState.
+ *   departHint, fuelNeed, isMoving, getRoute, choose(step, idx), answer(dialogId?, accept), getState, debugState.
+ * Лидер игрока: предупреждения о голоде/усталости, «сам поест/приляжет», если стоит без дела (leader.js).
  */
 import { EVENTS } from '../../core/events.js';
 import { registerDefs } from './defs.js';
 import { registerStrings } from './strings.js';
 import { generateRoute, BOSS_STEP, STEP_BIOME } from './route.js';
 import { createState, stationInfo, targetOption, hours, notify, safe } from './state.js';
-import { canDepart, depart, choose, travelTick, wildStop, isTravelling, isMoving } from './travel.js';
+import { canDepart, depart, choose, travelTick, wildStop, isTravelling, isMoving, fuelNeed, departHint } from './travel.js';
+import { leaderNeedsTick } from './leader.js';
 import { rotTick, startRotTimer, rotHoursFor, rotHoursLeft } from './rot.js';
 import { tellerTick, startTeller, registerThoughts, answerDialog } from './teller.js';
 import { registerUI } from './ui.js';
@@ -70,6 +72,7 @@ export function register(game) {
         bossTick(J);
       }
       if (game.time.tick % 30 === 0) tellerTick(J);
+      if (S.phase !== 'ended') leaderNeedsTick(J);
     },
   }, OWNER);
 
@@ -95,6 +98,8 @@ export function register(game) {
     isTravelling: () => isTravelling(J),
     isMoving: () => isMoving(J),
     canDepart: () => canDepart(J),
+    departHint: () => departHint(J),
+    fuelNeed: () => fuelNeed(J),
     depart: () => depart(J),
     getAmbientTemp() {
       const biome = game.api.journey.getBiome();
@@ -114,7 +119,7 @@ export function register(game) {
 }
 
 function freshRuntime() {
-  return { expect: null, scroll: 0, speedVis: 0, openRoute: false, openDialog: false, showVictory: false };
+  return { expect: null, scroll: 0, speedVis: 0, openRoute: false, openDialog: false, showVictory: false, warned: {}, leaderIdle: 0 };
 }
 
 function bossTick(J) {

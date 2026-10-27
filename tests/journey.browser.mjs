@@ -91,7 +91,7 @@ try {
     const game = window.__game;
     return { scen: game.colony.scenarioId, cars: game.train.cars.map((c) => c.type), fuel: game.api.train.fuelUnits(), hud: game.ui.hud.has('journey:status') };
   });
-  check(info.scen === 'three_survivors' && info.fuel === 72 && info.hud, `старт: ${JSON.stringify(info)}`);
+  check(info.scen === 'three_survivors' && info.fuel === 90 && info.hud, `старт: ${JSON.stringify(info)}`);
   await frames(10);
   await shot('01-start');
   // F4 — карта маршрута
@@ -144,7 +144,7 @@ try {
   // станция 4 и дракон
   await refuel(4, null);
   await fastUntil("game.api.journey.getState().phase !== 'travel'", 20000);
-  await fastUntil("game.entities.listKind('pawn').some((p) => p.boss?.id === 'bone_dragon')", 1500);
+  await fastUntil("game.entities.listKind('pawn').some((p) => p.boss?.id === 'bone_dragon')", 4500);
   await noon(1);
   await frames(20);
   await shot('06-dragon');
