@@ -57,6 +57,14 @@ export class Kit {
     this._wrap = new Map();
     this.scroll = {};
     this.lastHover = null;
+    /** Прямоугольники виджетов прошлых кадров (CSS px) по id — для тестов и отладки. */
+    this.rects = new Map();
+  }
+
+  /** Запомнить прямоугольник виджета (единицы UI → CSS px). */
+  note(id, x, y, w, h) {
+    const s = this.s;
+    this.rects.set(id, { x: x * s, y: y * s, w: w * s, h: h * s, frame: this.frameNo });
   }
 
   get input() {
@@ -362,6 +370,7 @@ export class Kit {
   /** Кнопка. opts: {accent, active, disabled, tooltip, size, sub, align, icon, focus: true, danger, ghost} */
   button(id, x, y, w, h, label, o = {}) {
     const ctx = this.ctx;
+    this.note(id, x, y, w, h);
     const hover = !o.disabled && this.inside(x, y, w, h);
     const focused = o.focus !== false && !o.disabled && this.focusable(id, hover);
     this.block(x, y, w, h);
@@ -394,7 +403,7 @@ export class Kit {
       drawIcon(ctx, o.icon, ix, y + h / 2, 7, o.disabled ? C.faint : o.iconColor || accent);
     }
     const ty = o.sub ? y + h / 2 - 8 : y + h / 2;
-    this.text(label, align === 'center' && o.icon ? tx + 10 : tx, ty, { align, baseline: 'middle', size, bold: true, color, maxW: w - 20 });
+    this.text(label, align === 'center' && o.icon ? tx + 10 : tx, ty, { align, baseline: 'middle', size, bold: true, color, maxW: w > 40 ? w - 20 : w });
     if (o.sub) this.text(o.sub, align === 'center' ? x + w / 2 : tx, y + h / 2 + 9, { align, baseline: 'middle', size: 11, color: C.dim, maxW: w - 20 });
     if (o.tooltip && hover) this.tip(Array.isArray(o.tooltip) ? o.tooltip : [o.tooltip]);
     if (o.disabled) return false;
@@ -409,6 +418,7 @@ export class Kit {
   /** Переключатель. @returns {boolean|undefined} новое значение при изменении */
   toggle(id, x, y, w, label, value, o = {}) {
     const h = o.h || 30;
+    this.note(id, x, y, w, h);
     const hover = this.inside(x, y, w, h);
     const focused = this.focusable(id, hover);
     this.block(x, y, w, h);
@@ -527,6 +537,7 @@ export class Kit {
     options.forEach((op, i) => {
       const cx = x + i * (cw + gap);
       const sel = op.id === value;
+      this.note(`${id}:${op.id}`, cx, y, cw, h);
       const hov = this.inside(cx, y, cw, h);
       const acc = op.color || o.accent || C.cyan;
       ctx.fillStyle = sel ? rgba(acc, 0.22) : hov ? 'rgba(108,92,255,0.18)' : 'rgba(18,22,46,0.85)';
@@ -613,6 +624,7 @@ export class Kit {
   /** Текстовое поле. @returns {string} текущее значение */
   textField(id, x, y, w, h, value, o = {}) {
     const ctx = this.ctx;
+    this.note(id, x, y, w, h);
     const hover = this.inside(x, y, w, h);
     const focusedNav = this.focusable(id, hover);
     const editing = this.textFocus === id;
