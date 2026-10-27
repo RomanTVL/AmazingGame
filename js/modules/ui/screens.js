@@ -116,10 +116,10 @@ function newGameScreen(ctx, game, M, W, H) {
   y += 18;
   // поля
   const fw = (r.w - 16) / 2;
-  F.colony = k.textField('ng:colony', r.x, y, fw, 34, F.colony, { label: t('ui.ng.colony'), placeholder: t('colony.defaultName'), maxLen: 28 });
-  F.leader = k.textField('ng:leader', r.x + fw + 16, y, fw, 34, F.leader, { label: t('ui.ng.leader'), placeholder: t('ui.ng.leaderPh'), maxLen: 28 });
+  F.colony = k.textField('ng:colony', r.x, y, fw, 34, F.colony, { label: t('ui.ng.colony'), placeholder: t('colony.defaultName'), maxLen: 28, clear: true, clearTip: t('ui.ng.clear') });
+  F.leader = k.textField('ng:leader', r.x + fw + 16, y, fw, 34, F.leader, { label: t('ui.ng.leader'), placeholder: t('ui.ng.leaderPh'), maxLen: 28, clear: true, clearTip: t('ui.ng.clear') });
   y += 34 + 30;
-  F.seed = k.textField('ng:seed', r.x, y, fw, 34, F.seed, { label: t('ui.ng.seed'), maxLen: 16 });
+  F.seed = k.textField('ng:seed', r.x, y, fw, 34, F.seed, { label: t('ui.ng.seed'), maxLen: 24, clear: true, clearTip: t('ui.ng.clear') });
   if (k.button('ng:dice', r.x + fw + 8, y, 40, 34, '', { icon: 'dice', tooltip: t('ui.ng.reroll') })) F.seed = String(Math.floor(Math.random() * 1e9));
   y += 34 + 22;
   // сложность

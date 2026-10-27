@@ -415,18 +415,11 @@ export class MenuScene {
     const wheelA = t * speed / (13 * sc);
     drawTrainSide(ctx, fx, ry, sc, t, { moving: true, wagons: Math.ceil((fx / (160 * sc))) + 1, wheel: wheelA });
     this._particles(ctx, fx, ry, sc, t, dt, w, h);
-    // передний план: стволы
-    ctx.fillStyle = '#020207';
-    const per = 2600;
-    for (let k = 0; k < 2; k++) {
-      const x = ((k * 1300 + 400 - t * 640) % per + per) % per - 300;
-      const tw = 46 + k * 22;
-      ctx.fillRect(x, 0, tw, h);
-      ctx.fillRect(x + tw + 70, h * 0.1, tw * 0.6, h);
-      ctx.fillStyle = 'rgba(108,92,255,0.08)';
-      ctx.fillRect(x + tw - 2, 0, 2, h);
-      ctx.fillStyle = '#020207';
-    }
+    // передний план: низкий кустарник у насыпи (быстро уходит назад, не перекрывает заголовок и кнопки)
+    const nearH = Math.ceil((h * 0.12) / 20) * 20;
+    ctx.globalAlpha = 0.85;
+    tiled(ctx, forestStrip('near', fw, nearH, { color: '#030209', rim: 'rgba(108,92,255,0.18)', density: 2.2, minH: 0.25, maxH: 0.7, seed: 17 }), t * 520, h - nearH + 4, w);
+    ctx.globalAlpha = 1;
     // туман снизу
     const fog = ctx.createLinearGradient(0, h * 0.82, 0, h);
     fog.addColorStop(0, 'rgba(30,24,60,0)');

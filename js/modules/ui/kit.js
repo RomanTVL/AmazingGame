@@ -50,6 +50,8 @@ export class Kit {
     this.navX = 0;
     this.drag = null;
     this.textFocus = null;
+    this.selAll = null;
+    this._paste = '';
     this._typedFrame = -1;
     this.tipLines = null;
     this.time = 0;
@@ -469,6 +471,7 @@ export class Kit {
   slider(id, x, y, w, label, value, min, max, step, o = {}) {
     const h = o.h || 34;
     const ctx = this.ctx;
+    this.note(id, x, y, w, h);
     const hover = this.inside(x, y, w, h);
     const focused = this.focusable(id, hover);
     this.block(x, y, w, h);
@@ -508,12 +511,10 @@ export class Kit {
       this.drag = id;
     }
     if (this.drag === id) {
+      // значение применяем и в кадре отпускания (нажал и отпустил за один кадр — обычный клик)
+      const nv = snap(min + ((this.mx - tx) / tw) * (max - min));
       if (!this.input.keyDown('Mouse0')) this.drag = null;
-      else {
-        const nv = snap(min + ((this.mx - tx) / tw) * (max - min));
-        if (nv !== value) return nv;
-        return undefined;
-      }
+      return nv !== value ? nv : undefined;
     }
     if (focused && this.navX) {
       const d = this.navX;
@@ -621,7 +622,8 @@ export class Kit {
     return false;
   }
 
-  /** Текстовое поле. @returns {string} текущее значение */
+  /** Текстовое поле. opts: {label, placeholder, maxLen, size, clear: кнопка «×» очистить}. @returns {string} текущее значение
+   *  Клик — правка с выделением всего текста (набор заменяет), Ctrl+A — выделить всё, Ctrl+V — вставка (событие paste). */
   textField(id, x, y, w, h, value, o = {}) {
     const ctx = this.ctx;
     this.note(id, x, y, w, h);
@@ -637,35 +639,86 @@ export class Kit {
     roundRect(ctx, x + 0.5, y + 0.5, w - 1, h - 1, 6);
     ctx.stroke();
     if (o.label) this.text(o.label, x, y - 17, { size: 12, color: C.dim });
+    const maxLen = o.maxLen || 32;
     let v = String(value ?? '');
     if (editing && this._typedFrame !== this.frameNo) {
       this._typedFrame = this.frameNo;
-      for (const ch of this.input.typed) {
-        if (ch === '\b') v = v.slice(0, -1);
-        else if (ch >= ' ' && v.length < (o.maxLen || 32)) v += ch;
+      const inp = this.input;
+      if (inp.mods.ctrl && inp.keyPressed('KeyA')) this.selAll = id;
+      const add = (str) => {
+        for (const ch of str) {
+          if (ch === '\b') {
+            v = this.selAll === id ? '' : v.slice(0, -1);
+            this.selAll = null;
+          } else if (ch >= ' ') {
+            if (this.selAll === id) {
+              v = '';
+              this.selAll = null;
+            }
+            if (v.length < maxLen) v += ch;
+          }
+        }
+      };
+      add(inp.typed);
+      if (this._paste) {
+        add(this._paste.replace(/[\r\n\t]+/g, ' '));
+        this._paste = '';
       }
-      if (this.input.keyPressed('Enter') || this.input.keyPressed('NumpadEnter')) this.blurText();
+      if (inp.keyPressed('Enter') || inp.keyPressed('NumpadEnter')) this.blurText();
     }
+    const clearW = o.clear && v ? 24 : 0;
     const shown = v || (editing ? '' : o.placeholder || '');
-    const tw = this.text(shown, x + 10, y + h / 2, { baseline: 'middle', size: o.size || 15, color: v ? '#fff' : C.faint, maxW: w - 24 });
-    if (editing && Math.floor(this.time * 2.2) % 2 === 0) {
+    const sel = editing && this.selAll === id && v;
+    if (sel) {
+      ctx.fillStyle = rgba(C.cyan, 0.28);
+      const sw = Math.min(w - 20 - clearW, this.measure(v, o.size || 15));
+      ctx.fillRect(x + 8, y + 7, sw + 4, h - 14);
+    }
+    const tw = this.text(shown, x + 10, y + h / 2, { baseline: 'middle', size: o.size || 15, color: v ? '#fff' : C.faint, maxW: w - 24 - clearW });
+    if (editing && !sel && Math.floor(this.time * 2.2) % 2 === 0) {
       ctx.fillStyle = C.cyan;
       ctx.fillRect(x + 11 + (v ? tw : 0), y + 7, 1.5, h - 14);
     }
     if (focusedNav && !editing) this.focusRing(x, y, w, h);
+    if (clearW) {
+      this.note(`${id}:clear`, x + w - clearW - 4, y + (h - 22) / 2, clearW, 22);
+      if (o.clearTip && this.inside(x + w - clearW - 4, y + (h - 22) / 2, clearW, 22)) this.tip([o.clearTip]);
+      if (this.smallBtn(x + w - clearW - 4, y + (h - 22) / 2, clearW, 22, '×', false)) {
+        v = '';
+        this.focusText(id);
+        this.selAll = null;
+        return v;
+      }
+    }
     if (this.clicked(x, y, w, h) || (this.activate === id && focusedNav)) {
       this.activate = null;
-      this.focusText(id);
+      if (!editing) this.focusText(id);
+      else this.selAll = null;
     } else if (editing && this.pressed(0) && !this.inside(x, y, w, h)) this.blurText();
     return v;
   }
 
   focusText(id) {
     this.textFocus = id;
+    this.selAll = id;
     this.input.captureText('ui');
+    // вставка из буфера: Ctrl+V шлёт событие paste (только браузер; вешаем один раз, лениво)
+    if (!this._pasteHooked && typeof window !== 'undefined') {
+      this._pasteHooked = true;
+      window.addEventListener('paste', (e) => {
+        if (!this.textFocus) return;
+        const txt = e.clipboardData?.getData('text') || '';
+        if (txt) {
+          this._paste = (this._paste || '') + txt;
+          e.preventDefault();
+        }
+      });
+    }
   }
 
   blurText() {
+    this.selAll = null;
+    this._paste = '';
     if (this.textFocus) {
       this.textFocus = null;
       this.input.releaseText();

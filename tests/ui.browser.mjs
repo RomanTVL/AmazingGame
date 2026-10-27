@@ -82,9 +82,25 @@ try {
   // 2. новая игра
   await clickWidget('main:new');
   check((await screen()) === 'new', 'кнопка «Новая игра» открыла экран новой игры');
-  await typeInto('ng:colony', 'Kovcheg');
+  // вставка из буфера (Ctrl+V → событие paste) и Ctrl+A
+  await clickWidget('ng:colony');
+  await page.keyboard.type('xyz');
+  await page.keyboard.press('Control+A');
+  await g(() => {
+    const dt = new DataTransfer();
+    dt.setData('text/plain', 'Kovcheg');
+    window.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true }));
+  });
+  await frames(3);
+  check((await g(() => window.__game.api.ui.newGameForm().colony)) === 'Kovcheg', 'поле ввода: Ctrl+A и вставка из буфера');
   await typeInto('ng:leader', 'Ada Test');
-  await typeInto('ng:seed', '4242', 12);
+  const seed0 = await g(() => window.__game.api.ui.newGameForm().seed);
+  await typeInto('ng:seed', '4242'); // клик выделяет весь текст — набор заменяет случайный сид
+  check(seed0 !== '4242' && (await g(() => window.__game.api.ui.newGameForm().seed)) === '4242', 'сид: набор заменяет выделенный текст');
+  await clickWidget('ng:seed:clear');
+  check((await g(() => window.__game.api.ui.newGameForm().seed)) === '', 'сид: кнопка «×» очищает поле');
+  await page.keyboard.type('4242', { delay: 15 });
+  await frames(2);
   await clickWidget('ng:diff:hard');
   await page.mouse.move(800, 860);
   await frames(4);
@@ -114,8 +130,33 @@ try {
   check(p1.tut.done.move && p1.tut.step === 'chop', `обучение: WASD засчитан, дальше рубка ${JSON.stringify(p1.tut)}`);
   await frames(10);
   await shot('03-play-tutorial');
+  const ui0 = await g(() => {
+    const game = window.__game;
+    const txt = game.t('hint.start');
+    const e = game.log.find((l) => l.text === txt);
+    return { toastHidden: !!e && e._shownAt < 0, card: game.api.ui.widgetRect('tut:skip') };
+  });
+  check(ui0.toastHidden, 'стартовый тост ядра не дублирует обучение');
+  check(ui0.card && ui0.card.y > 900 * 0.6, `карточка обучения внизу слева (${JSON.stringify(ui0.card)})`);
   await clickWidget('tut:skip');
   check((await g(() => window.__game.api.ui.tutorial().step)) === 'bed', 'обучение: «Дальше» переключает подсказку');
+  // шаг «кровать»: B открывает стройку с выбранной кроватью, карточка не под панелью
+  await page.keyboard.press('b');
+  await frames(6);
+  const bp = await g(() => {
+    const game = window.__game;
+    const def = game.ui.panels.get('build');
+    return { open: game.ui.isOpen('build'), tool: game.api.build.getTool(), panelBottom: 70 + Math.min(def.height, 900 - 120), card: game.api.ui.widgetRect('tut:skip'), cardFrame: game.api.ui.widgetRect('tut:skip')?.frame };
+  });
+  check(bp.open && bp.tool.id === 'bed', `B на шаге «кровать»: меню стройки с кроватью (${JSON.stringify(bp.tool)})`);
+  check(bp.card && bp.card.y > bp.panelBottom, `карточка обучения не перекрывается меню стройки (${bp.card?.y} > ${bp.panelBottom})`);
+  await shot('03b-build-tutorial');
+  await g(() => window.__game.api.build.setTool(null));
+  await frames(3);
+  // H вне кабины — шаг не засчитан
+  await page.keyboard.press('h');
+  await frames(4);
+  check(!(await g(() => window.__game.api.ui.tutorial().done.horn)), 'H вне кабины не засчитывает шаг «гудок»');
 
   // 4. Esc → пауза → сохранить в ячейку 1
   await page.keyboard.press('Escape');
@@ -159,6 +200,14 @@ try {
   await frames(3);
   await clickWidget('pause:settings');
   check((await screen()) === 'settings', 'пауза → «Настройки»');
+  // ползунок: клик (нажал и отпустил в одном кадре) сразу меняет значение
+  const vol0 = await g(() => window.__game.settings.get('musicVolume'));
+  const sr = await g(() => window.__game.api.ui.widgetRect('set:musicVolume'));
+  await page.mouse.click(sr.x + sr.w - 70, sr.y + sr.h / 2);
+  await frames(3);
+  const vol1 = await g(() => window.__game.settings.get('musicVolume'));
+  check(vol1 > vol0 + 0.2, `ползунок громкости: клик применяет значение (${vol0} → ${vol1})`);
+  await g((v) => window.__game.settings.set('musicVolume', v), vol0);
   await clickWidget('set:lang:en');
   const rude0 = await g(() => window.__game.settings.get('rudeSpeech'));
   await clickWidget('set:rudeSpeech');

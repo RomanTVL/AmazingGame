@@ -14,7 +14,10 @@
  *  • Сохранения: ячейки slot1..slot3 (из паузы), 'auto' (по 'journey:arrived'), 'quick' (ядро/F5 — после MVP).
  *  • Победа: journey открывает свою панель 'journey_victory'; ui показывает поверх неё полный экран итогов и
  *    закрывает панель вместе с экраном.
- *  • Обучение: tutorial.js, настройка 'ui.tutorial' (по умолчанию вкл.), HUD 'ui:tutorial' (слот left).
+ *  • Обучение: tutorial.js, настройка 'ui.tutorial' (по умолчанию вкл.), HUD 'ui:tutorial' (слот bottom-left, над
+ *    карточкой лидера; прячется под панелью слева). Пока оно идёт, стартовый тост ядра 'hint.start' не показывается.
+ *  • HUD ядра 'core:controls' заменён: та же строка клавиш, но ужимается/обрезается, чтобы не залезать на панель
+ *    заклинаний внизу по центру.
  *
  * API (game.api.ui, свои функции): screen() → id верхнего экрана | null, openScreen(id), closeScreens(),
  *   menuAction(name, arg) — то же, что кнопки (new/start/loadSlot/saveSlot/back/exit/resume), newGameForm() → форма,
@@ -25,7 +28,7 @@ import { Kit } from './kit.js';
 import { registerStrings } from './strings.js';
 import { createSaved, createRuntime, wireState, trackPeak, sampleLeg } from './state.js';
 import { drawScreens, SCREEN_IDS, slotName } from './screens.js';
-import { wireTutorial, tutorialFrame, tutorialActive, drawTutorial, currentStep, TUTORIAL_SETTING } from './tutorial.js';
+import { wireTutorial, tutorialFrame, tutorialActive, tutorialHeight, drawTutorial, currentStep, TUTORIAL_SETTING } from './tutorial.js';
 
 const OWNER = 'ui';
 const PANEL = 'ui_screen';
@@ -79,6 +82,10 @@ export function register(game) {
     R.breaks.clear();
     R.raid = null;
     R.pendingAutosave = null;
+    R.bedPicked = false;
+  }, OWNER);
+  game.events.on(EVENTS.COLONY_STARTED, () => {
+    R.hideStartHint = true;
   }, OWNER);
   wireState(game, M);
   wireTutorial(game, M);
@@ -282,6 +289,14 @@ export function register(game) {
         if (bytes > 0) g.api.ui.notify(g.t('ui.slots.autosaved'), { type: 'info' });
       }
       tutorialFrame(g, M);
+      // стартовый тост ядра «WASD — идти…» дублирует обучение — не показываем его, пока обучение идёт
+      if (R.hideStartHint && g.log.length) {
+        R.hideStartHint = false;
+        if (tutorialActive(M)) {
+          const txt = g.t('hint.start');
+          for (const e of g.log.slice(-6)) if (e && e.text === txt) e._shownAt = -1e12;
+        }
+      }
       if (R.tutDoneAt >= 0 && R.tutDoneShown !== R.tutDoneAt) {
         R.tutDoneShown = R.tutDoneAt;
         g.api.ui.notify(g.t('ui.tut.done'), { type: 'good' });
@@ -301,11 +316,35 @@ export function register(game) {
   }, OWNER);
   game.ui.registerHud({
     id: 'ui:tutorial',
-    slot: 'left',
+    slot: 'bottom-left',
     order: 50,
-    visible: () => tutorialActive(M),
+    height: (g, ui) => tutorialHeight(g, M, ui),
     draw: (ctx, g, ui, box) => drawTutorial(ctx, g, M, box),
   }, OWNER);
+  // строка клавиш ядра — та же, но не наезжает на панель заклинаний (bottom-center)
+  if (game.ui.hud.has('core:controls')) {
+    game.ui.hud.remove('core:controls');
+    game.ui.registerHud({
+      id: 'core:controls',
+      slot: 'bottom-right',
+      order: 10,
+      height: 18,
+      draw(ctx, g, ui, box) {
+        const avail = box.x - (ui.w / 2 + 150);
+        if (avail < 160) return 18;
+        let parts = g.t('hud.controls').split(' · ');
+        let size = 11;
+        ctx.font = ui.font(size);
+        if (ctx.measureText(parts.join(' · ')).width > avail) {
+          size = 10;
+          ctx.font = ui.font(size);
+        }
+        while (parts.length > 1 && ctx.measureText(parts.join(' · ')).width > avail) parts = parts.slice(0, -1);
+        ui.text(parts.join(' · '), box.x, box.y + 2, { align: 'right', size, color: 'rgba(140,147,184,0.85)' });
+        return 18;
+      },
+    }, OWNER);
+  }
 
   // ---------- API ----------
   game.provide('ui', {

@@ -13,7 +13,7 @@ export const STEPS = [
   { id: 'chop', key: 'E' },
   { id: 'bed', key: 'B' },
   { id: 'arms', key: 'R', actions: ['player:callToArms'] },
-  { id: 'horn', key: 'H', actions: ['journey:horn'] },
+  { id: 'horn', key: 'H' }, // засчитывается только настоящим гудком из кабины ('journey:horn')
   { id: 'route', key: 'F4' },
 ];
 
@@ -75,6 +75,11 @@ export function wireTutorial(game, M) {
   on(EVENTS.JOURNEY_HORN, () => markDone(M, 'horn'));
   on(EVENTS.UI_PANEL_OPENED, ({ id } = {}) => {
     if (id === 'route') markDone(M, 'route');
+    // шаг «кровать»: меню стройки сразу с выбранной кроватью (вкладка «Мебель» — в тексте подсказки)
+    if (id === 'build' && currentStep(M)?.id === 'bed' && tutorialActive(M) && !M.R.bedPicked && game.defs.buildings.has('bed')) {
+      M.R.bedPicked = true;
+      call(game, 'build', 'setTool', ['place', { id: 'bed', kind: 'building' }]);
+    }
   });
 }
 
@@ -89,7 +94,36 @@ export function tutorialFrame(game, M) {
   }
 }
 
-/** HUD-карточка обучения (слот 'left'). */
+const CARD_W = 330;
+const TEXT_W = CARD_W - 96;
+
+/** Высота карточки (единицы UI). */
+function cardHeight(M, text) {
+  const k = M.kit;
+  const th = k.ctx ? k.paraHeight(text, TEXT_W, { size: 13 }) : 72;
+  return Math.max(96, 40 + th + 30);
+}
+
+/** Высота HUD-карточки в CSS px (слот bottom-left, над карточкой лидера); 0 — не рисовать.
+ *  Прячется, если её накрыла бы панель слева (меню стройки и т.п.). */
+export function tutorialHeight(game, M, ui) {
+  if (!tutorialActive(M)) return 0;
+  const step = currentStep(M);
+  const s = M.kit.scale();
+  const h = cardHeight(M, game.t(`ui.tut.${step.id}`)) * s;
+  const H = ui?.h || 0;
+  if (H) {
+    const top = H - 14 - 72 - 40 - h;
+    for (const id of game.ui.open) {
+      const def = game.ui.panels.get(id);
+      if (def?.anchor !== 'left') continue;
+      if (70 + Math.min(def.height, H - 120) > top) return 0;
+    }
+  }
+  return h;
+}
+
+/** HUD-карточка обучения. */
 export function drawTutorial(ctx, game, M, box) {
   const k = M.kit;
   const T = tut(M);
@@ -101,29 +135,27 @@ export function drawTutorial(ctx, game, M, box) {
   const s = k.s;
   const x = box.x / s;
   const y = box.y / s;
-  const w = 300;
+  const w = CARD_W;
   const text = game.t(`ui.tut.${step.id}`);
-  const tw = w - 92;
-  const th = k.paraHeight(text, tw, { size: 13 });
-  const h = Math.max(96, 44 + th + 30);
+  const h = cardHeight(M, text);
   const i = STEPS.indexOf(step) + 1;
   const pulse = 0.5 + 0.5 * Math.sin(M.R.realTime * 3);
-  // карточка не перехватывает мышь мира (кроме своих кнопок)
-  k.panel(x, y, w, h, { accent: C.cyan, block: false, glowMul: 1 + pulse });
+  // карточка — область UI: мир под ней не получает клик и не рисует свою подсказку поверх
+  k.panel(x, y, w, h, { accent: C.cyan, glowMul: 1 + pulse });
   k.text(game.t('ui.tut.head', { i, n: STEPS.length }), x + 14, y + 11, { size: 11, bold: true, color: C.cyan });
   // клавиша
-  const kw = Math.max(46, k.measure(step.key, 16, 700, MONO) + 18);
+  const kw = Math.min(62, Math.max(46, k.measure(step.key, 16, 700, MONO) + 18));
   const kx = x + 14;
   const ky = y + 34;
   ctx.fillStyle = 'rgba(94,242,255,0.12)';
   ctx.strokeStyle = `rgba(94,242,255,${0.55 + 0.4 * pulse})`;
   ctx.lineWidth = 1.4;
   ctx.beginPath();
-  ctx.roundRect ? ctx.roundRect(kx, ky, Math.min(kw, 62), 40, 7) : ctx.rect(kx, ky, Math.min(kw, 62), 40);
+  ctx.roundRect ? ctx.roundRect(kx, ky, kw, 40, 7) : ctx.rect(kx, ky, kw, 40);
   ctx.fill();
   ctx.stroke();
-  k.text(step.key, kx + Math.min(kw, 62) / 2, ky + 20, { align: 'center', baseline: 'middle', font: `700 ${step.key.length > 3 ? 13 : 16}px ${MONO}`, color: '#fff' });
-  k.para(text, x + 84, y + 32, tw, { size: 13, color: C.text });
+  k.text(step.key, kx + kw / 2, ky + 20, { align: 'center', baseline: 'middle', font: `700 ${step.key.length > 3 ? 13 : 16}px ${MONO}`, color: '#fff' });
+  k.para(text, x + 84, y + 32, TEXT_W, { size: 13, color: C.text });
   // кнопки
   if (k.button('tut:skip', x + w - 92, y + h - 30, 80, 22, game.t('ui.tut.skip'), { size: 11, focus: false, ghost: true })) markDone(M, step.id);
   if (k.button('tut:off', x + w - 28, y + 7, 18, 18, '×', { size: 12, focus: false, ghost: true, tooltip: game.t('ui.tut.off') })) game.settings.set(TUTORIAL_SETTING, false);
