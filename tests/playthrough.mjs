@@ -284,6 +284,12 @@ async function chooseRoute(step, pick) {
 
 /** Гудок из кабины (настоящая клавиша H) → посадка → отправление. */
 async function departNow(label) {
+  // лидер упал или идёт бой — ждём (как игрок), до 8 ч
+  const ready = "!game.getLeader()?.downed && !game.api.combat.isRaidActive()";
+  if (!(await g((c) => new Function('game', `return (${c})`)(window.__game), ready))) {
+    const w = await runUntil(ready, 8 * 600, { fight: true });
+    log(`${label}: ждали лидера/конца боя ${(w.ticks / 600).toFixed(1)} ч`);
+  }
   await g(() => window.__pt.carryDowned());
   await g(() => window.__pt.toCab());
   await frames(6);
@@ -291,7 +297,10 @@ async function departNow(label) {
   await wait(600);
   await frames(4);
   const b = await g(() => !!window.__game.train.ops?.boarding || window.__game.api.journey.getState().phase === 'travel');
-  if (!check(b, `${label}: H в кабине — посадка`)) return false;
+  if (!check(b, `${label}: H в кабине — посадка`)) {
+    log(JSON.stringify({ ...(await info()), leaderDowned: await g(() => !!window.__game.getLeader()?.downed), inCab: await g(() => window.__game.api.train.isInCab?.(window.__game.getLeader())) }));
+    return false;
+  }
   // посадка 30 с игрового времени; не севшие — окно подтверждения «Ехать»
   let k = 0;
   while (k < 4000) {
@@ -349,15 +358,6 @@ async function stay(tag, minHours) {
     const s = await info();
     if (s.lost || s.errors || s.victory) return s;
     if (guard % 6 === 0) await g(() => window.__pt.designateFuel());
-    if (process.env.BEDDEBUG && tag === 'станция 0') {
-      log(await g(() => {
-        const game = window.__game;
-        const bp = game.entities.listKind('blueprint')[0];
-        const res = bp ? [...game.jobs.reservations].filter(([k]) => k.includes(':' + bp.id + ':') || k.endsWith('' + bp.id)).map(([k, v]) => k + '→' + game.entities.get(v)?.name) : [];
-        const wood = game.entities.listKind('item').filter((i) => i.defId === 'wood').map((i) => i.count + '@' + (game.train.carAt(Math.floor(i.x), Math.floor(i.y))?.type || 'ground') + '(' + Math.floor(i.x) + ',' + Math.floor(i.y) + ')').join(' ');
-        return game.time.hourInt + 'ч bp ' + (bp ? JSON.stringify(game.api.build.needs(bp)) + ' @' + bp.x + ',' + bp.y : '-') + ' res ' + res.join(',') + ' | ' + game.colonists().map((p) => p.name.split(' ')[0] + ':' + (p.job?.type || '-') + (p.carry ? '[' + p.carry.defId + ']' : '') + (p.asleep ? 'z' : '') + '(' + Math.floor(p.x) + ',' + Math.floor(p.y) + ')').join(' ') + ' | wood ' + wood;
-      }));
-    }
     const stayed = (s.tick - t0) / HT;
     const rotSoon = s.rotLeft < 2;
     const fuelOk = s.canDepart && s.fuel >= (s.need ?? 0) + 6;
@@ -471,8 +471,23 @@ try {
   await frames(3);
   await tap('KeyB');
   await frames(3);
+  // поселенцы — рядом с лидером (иначе «Никто не услышал призыва»)
+  await g(() => {
+    const game = window.__game;
+    const L = game.getLeader();
+    for (const p of game.colonists()) if (p !== L && !p.asleep && Math.hypot(p.x - L.x, p.y - L.y) > 6) {
+      const cx = Math.floor(L.x);
+      const cy = Math.floor(L.y);
+      const q = [[2, 0], [-2, 0], [0, 2], [0, -2], [2, 2], [-2, -2]].map(([dx, dy]) => ({ x: cx + dx, y: cy + dy })).find((c) => game.map.isPassable(c.x, c.y));
+      if (q) game.entities.setPosition(p, q.x + 0.5, q.y + 0.5);
+    }
+  });
   await tap('KeyR');
-  check(await g(() => window.__game.api.ui.tutorial().done.arms), 'R: «К оружию!»');
+  const armed = await g(() => window.__game.colonists().filter((p) => p.drafted && !p.isLeader).length);
+  check(await g(() => window.__game.api.ui.tutorial().done.arms), `R: «К оружию!» (откликнулись ${armed})`);
+  await run(300);
+  await tap('KeyR'); // подсказка: «Ещё раз R — Отбой»
+  check((await g(() => window.__game.colonists().filter((p) => p.drafted && !p.isLeader).length)) === 0, 'R ещё раз: «Отбой», все вернулись к делам');
   await measureFps('станция 0, день');
   await chooseRoute(1, (o) => Math.max(0, o.indexOf('forest')));
   await saveLoadCycle('станция 0');
@@ -501,11 +516,9 @@ try {
       await shot('04-raid-after');
     }
     if (step > 0) {
-      const opts = await g((s) => window.__game.api.journey.getRoute().steps[s].map((o) => o.type), step);
       const lowFuel = st.fuel < 50;
       const score = (t) => (lowFuel ? { ash: 3, ruins: 2, village: 1, forest: 0 } : { village: 3, forest: 2, ash: 1, ruins: 0 })[t] ?? 0;
       await chooseRoute(step + 1, (o) => (score(o[0]) >= score(o[1]) ? 0 : 1));
-      void opts;
     }
     if (!(await departNow(`станция ${step}`))) break;
     if (step === 0) {
