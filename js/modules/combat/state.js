@@ -34,6 +34,7 @@ export function createRuntime() {
     prisoners: 0,
     nameless: 0,
     heartId: 0,
+    bossId: 0, // активный подвижный босс (цель «всем на босса»)
     posts: new Map(), // пост у окна/двери (гудок): pawnId → {x, y}
     prisonerSel: 0,
     execConfirm: 0,

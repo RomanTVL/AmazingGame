@@ -37,7 +37,11 @@ export function refreshLists(game, C) {
   }
   R.hostiles = en.length;
   R.alarm = false;
-  if (en.length) {
+  R.bossId = 0;
+  for (const e of en) if (e.boss && !e.stationary) R.bossId = e.id;
+  // босс на карте — тревога для всех: бой с ним — дело всей команды
+  if (R.bossId) R.alarm = true;
+  else if (en.length) {
     const home = game.train?.stamped ? game.train.center() : null;
     for (const e of en) {
       if (!home || (e.x - home.x) ** 2 + (e.y - home.y) ** 2 < 28 * 28) {
@@ -185,6 +189,8 @@ function kite(game, C, p, w) {
   return false;
 }
 
+const COLONY_REACH_BONUS = 0.3;
+
 export function engage(game, C, p, t, opts = {}) {
   const now = game.time.tick;
   const w = weaponStats(game, C, p);
@@ -210,7 +216,8 @@ export function engage(game, C, p, t, opts = {}) {
     if (opts.hold) return 'blocked';
     return approach(game, p, c.x, c.y, true) ? 'move' : 'blocked';
   }
-  const reach = (w.reach || 1.5) + (p.boss ? 0.6 : 0);
+  // поселенцам +0.3: сосед по диагонали (≈1.4–1.7 с учётом смещения в клетке) — в досягаемости; врагам — как было
+  const reach = (w.reach || 1.5) + (p.boss ? 0.6 : 0) + (p.faction === 'colony' ? COLONY_REACH_BONUS : 0);
   if (d <= reach) {
     halt(p);
     p.dir = Math.atan2(c.y - p.y, c.x - p.x);
@@ -322,11 +329,30 @@ export function robPawn(game, C, robber, victim) {
   return took;
 }
 
+/** Тендер (вагон только для топлива) — его не грабят: без угля поезд встаёт, а это не наказание за рейд. */
+function inTender(game, it) {
+  const tr = game.train;
+  if (!tr?.stamped) return false;
+  const car = tr.carAt(Math.floor(it.x), Math.floor(it.y));
+  return !!car && !!tr.carDef(car).fuelOnly;
+}
+const FUEL_LOOT_CAP = 8; // топливо со склада вне тендера — не больше горсти за рейд
+
+/** Можно ли украсть эту кучу (склад, переносимое, не уникальное, не из тендера, топливо — в пределах лимита). */
+function stealable(game, raid, it) {
+  if (!game.items.isStored(it)) return false;
+  const def = game.defs.items.get(it.defId);
+  if (!def || def.haulable === false || def.unique) return false;
+  if (inTender(game, it)) return false;
+  if (def.category === 'fuel' && (raid.fuelStolen || 0) >= FUEL_LOOT_CAP) return false;
+  return true;
+}
+
 /** Украсть со склада (до 30% сложенного у ближайшей зоны). */
 function stealTick(game, C, p, raid) {
   if (raid.stealBudget < 0) {
     let total = 0;
-    for (const it of game.entities.ofKind('item')) if (game.items.isStored(it) && game.defs.items.get(it.defId)?.haulable !== false) total += it.count;
+    for (const it of game.entities.ofKind('item')) if (stealable(game, raid, it)) total += it.count;
     raid.stealBudget = Math.ceil(total * 0.3);
   }
   if (raid.stealBudget <= 0) {
@@ -338,9 +364,7 @@ function stealTick(game, C, p, raid) {
     it = null;
     let bestD = 1e9;
     for (const o of game.entities.ofKind('item')) {
-      if (!game.items.isStored(o)) continue;
-      const def = game.defs.items.get(o.defId);
-      if (!def || def.haulable === false || def.unique) continue;
+      if (!stealable(game, raid, o)) continue;
       const d = (o.x - p.x) ** 2 + (o.y - p.y) ** 2;
       if (d < bestD) {
         bestD = d;
@@ -354,11 +378,18 @@ function stealTick(game, C, p, raid) {
     p._stealId = it.id;
   }
   if (dist(p.x, p.y, it.x + 0.5, it.y + 0.5) <= 1.6) {
-    const n = game.items.take(it, Math.min(raid.stealBudget, 25));
+    const fuel = game.defs.items.get(it.defId)?.category === 'fuel';
+    if (!stealable(game, raid, it)) {
+      p._stealId = 0;
+      return;
+    }
+    const cap = fuel ? FUEL_LOOT_CAP - (raid.fuelStolen || 0) : 25;
+    const n = game.items.take(it, Math.min(raid.stealBudget, 25, cap));
     if (n > 0) {
       (p.loot ||= []).push({ defId: it.defId, count: n });
       raid.stealBudget -= n;
       raid.stolen += n;
+      if (fuel) raid.fuelStolen = (raid.fuelStolen || 0) + n;
     }
     p._stealId = 0;
     if ((p.loot?.length || 0) >= 4) p.leaving = true; // нагрузился — уходит
@@ -429,6 +460,14 @@ function raiderTick(game, C, p, job) {
   return 'running';
 }
 
+/** Цель при активном боссе: свой ближний противник (самооборона), иначе — сам босс. */
+function bossFocus(game, C, p, selfR) {
+  const boss = C.R.bossId ? game.entities.get(C.R.bossId) : null;
+  if (!boss || !isActiveFoe(boss) || !isHostile(p, boss)) return null;
+  return nearestHostile(game, C, p, { maxD: selfR }) || boss;
+}
+const BOSS_RALLY_D = 70;
+
 function defendTick(game, C, p) {
   if (!isArmed(game, p)) return 'done';
   if (hpRatio(game, p) < 0.3) return 'failed';
@@ -436,12 +475,13 @@ function defendTick(game, C, p) {
   let t = validTarget(game, p, p._tgt, false);
   if (!t || (game.time.tick + p.id) % 20 === 0) {
     t = nearestHostile(game, C, p, { maxD: C.R.alarm ? 32 : 16 });
+    if (C.R.bossId) t = bossFocus(game, C, p, 4) || t;
     p._tgt = t?.id || 0;
   }
   if (!t) return 'done';
-  // не убегать далеко от дома в погоне
+  // не убегать далеко от дома в погоне (кроме босса: на него идут всей командой)
   const home = homePoint(game);
-  const tooFar = dist(t.x, t.y, home.x, home.y) > 34;
+  const tooFar = !t.boss && dist(t.x, t.y, home.x, home.y) > 34;
   const w = weaponStats(game, C, p);
   engage(game, C, p, t, { hold: tooFar && w.kind === 'ranged' });
   if (tooFar && w.kind !== 'ranged') return 'done';
@@ -468,6 +508,11 @@ function armsTick(game, C, p) {
     t = validTarget(game, p, p._tgt, false);
     if (!t || (now + p.id) % 20 === 0) {
       t = nearestHostile(game, C, p, { maxD: w.kind === 'ranged' ? w.range : 7 });
+      // призванные бьют босса (если он рядом с лидером), отвлекаясь лишь на тех, кто вплотную
+      if (C.R.bossId) {
+        const f = bossFocus(game, C, p, 2.5);
+        if (f && dist(L.x, L.y, f.x, f.y) < 18) t = f;
+      }
       p._tgt = t?.id || 0;
     }
   }
@@ -838,7 +883,11 @@ export function registerAI(game, C) {
       // раненые (в т.ч. только что вставшие) в бой не лезут, пока не окрепнут
       if (!isArmed(g, p) || hpRatio(g, p) < 0.6 || g.api.mind.isInBreak(p)) return null;
       // тревога (рейд у поезда) — вооружённые сходятся на врага издалека
-      const t = nearestHostile(g, C, p, { maxD: C.R.alarm ? 30 : 12 });
+      let t = nearestHostile(g, C, p, { maxD: C.R.alarm ? 30 : 12 });
+      if (!t && C.R.bossId) {
+        const b = g.entities.get(C.R.bossId);
+        if (b && dist(p.x, p.y, b.x, b.y) < BOSS_RALLY_D) t = b;
+      }
       if (!t) return null;
       return fightJob(g, p, 'defend', 96);
     },

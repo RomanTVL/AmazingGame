@@ -500,6 +500,73 @@ function placeNear(g, defId, x, y) {
   ok(!col.dead && col.health.hp >= 9, 'упавший поселенец держится (минимум здоровья)');
 }
 
+// ---------- 13. Доработка боя: досягаемость по диагонали, тендер не грабят, спутники против босса ----------
+{
+  const g = await fresh(5);
+  const C = C_(g);
+  const { engage } = await import('../js/modules/combat/ai.js');
+  const L = g.getLeader();
+  const col = g.colonists().find((p) => !p.isLeader);
+  const r = g.api.combat.spawnRaid({ faction: 'bandits', points: 25, x: L.x + 10, y: L.y });
+  const e = g.entities.get(r.pawnIds[0]);
+  col.equipment.weapon = 'club';
+  (e.equipment ||= {}).weapon = 'club';
+  const bx = Math.floor(L.x) + 0.5;
+  const by = Math.floor(L.y) + 4.5;
+  col.x = bx;
+  col.y = by;
+  e.x = bx + 1.2;
+  e.y = by + 1.2;
+  g.entities.moved(col);
+  g.entities.moved(e);
+  col._nextAtk = 0;
+  e._nextAtk = 0;
+  ok(engage(g, C, col, e) === 'attack', 'поселенец бьёт соседа по диагонали (≈1.7)');
+  ok(engage(g, C, e, col) !== 'attack', 'враг — прежняя досягаемость 1.5');
+  // спутники против босса: стрелы ×, открытый позвонок — прицельно
+  const dr = g.api.combat.spawnBoss('bone_dragon', { x: L.x + 16, y: L.y });
+  const dragon = g.entities.get(dr.pawnId);
+  dragon.boss.weakUntil = 0;
+  let h = dragon.health.hp;
+  g.api.combat.damage(dragon, 10, { type: 'blunt', source: L, ranged: true });
+  const byLeader = h - dragon.health.hp;
+  h = dragon.health.hp;
+  g.api.combat.damage(dragon, 10, { type: 'blunt', source: col, ranged: true });
+  const byComp = h - dragon.health.hp;
+  ok(byComp >= 2 * byLeader, `выстрел спутника по боссу сильнее (${byComp.toFixed(1)} против ${byLeader.toFixed(1)})`);
+  dragon.boss.weakUntil = g.time.tick + 100;
+  h = dragon.health.hp;
+  g.api.combat.damage(dragon, 10, { type: 'blunt', source: col, ranged: true });
+  ok(h - dragon.health.hp >= 2.5 * byComp, 'спутник целит в открытый позвонок ×3');
+  g.api.combat.damage(dragon, 99999, { type: 'blunt', source: L, lethal: true });
+  step(g, 31);
+  ok(g.errors.length === 0, `ошибки (доработка): ${g.errors.map((x) => x.where + ' ' + x.message)}`);
+}
+{
+  // тендер не грабят
+  const g = await fresh(9);
+  const L = g.getLeader();
+  const tender = g.train.carOfType('tender');
+  const inT = (it) => g.train.carAt(Math.floor(it.x), Math.floor(it.y)) === tender;
+  const tenderCoal = () => g.entities.listKind('item').filter((it) => it.defId === 'coal' && inT(it)).reduce((n, it) => n + it.count, 0);
+  const cell = g.train.interior(tender).find((c) => g.map.isPassable(c.x, c.y) && !g.map.buildingAt(c.x, c.y));
+  g.items.spawn('coal', 40, cell.x, cell.y);
+  const coal0 = tenderCoal();
+  ok(coal0 >= 40, `уголь в тендере (${coal0})`);
+  for (const p of g.colonists()) {
+    p.x = 3;
+    p.y = 3;
+    g.entities.moved(p);
+  }
+  const r = g.api.combat.spawnRaid({ faction: 'bandits', points: 30, x: cell.x + 2, y: cell.y + 3 });
+  const raid = C_(g).S.raids.find((q) => q.id === r.id);
+  raid.phase = 'rob';
+  step(g, 1500);
+  ok(tenderCoal() >= coal0, `бандиты не тронули тендер (${coal0} → ${tenderCoal()})`);
+  ok((raid.fuelStolen || 0) <= 8, 'топлива вне тендера — не больше горсти');
+  void L;
+}
+
 console.log('—'.repeat(50));
 console.log(`combat: ${passed} проверок прошло, ${failed} упало`);
 if (failed) {

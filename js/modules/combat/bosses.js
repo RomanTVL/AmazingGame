@@ -9,6 +9,10 @@ import { engage, approach, nearestHostile } from './ai.js';
 import { spawnGear } from './items.js';
 import { secs } from './state.js';
 
+const SPELL_BOSS_MUL = 3.5;
+const COMPANION_RANGED_MUL = 2.5;
+const COMPANION_MELEE_MUL = 1.8;
+
 export const BOSS_IDS = ['bone_dragon', 'lich', 'rot_heart'];
 const ALIAS = { dragon: 'bone_dragon', bone: 'bone_dragon', puppeteer: 'lich', lich_puppeteer: 'lich', heart: 'rot_heart', rot: 'rot_heart', heart_of_rot: 'rot_heart' };
 
@@ -84,9 +88,20 @@ export function installBosses(game, C) {
         C.vfx('spark', { x: v.x, y: v.y, a: 0, color: '#ffd27a' });
       }
     }
+    // спутники (их оружие, не магия): бьют прицельно — в открытый позвонок дракона ×3, стрелы/болты по боссу ×1.6
+    // (пробивают костяную броню), ближний бой ×1.3. Бой с драконом — дело всей команды, не одной маны лидера.
+    const src = opts?.source;
+    if (src?.faction === 'colony' && !src.isLeader && !opts.spell && !opts.aoe) {
+      if (b.id === 'bone_dragon' && b.weakUntil > game.time.tick && m < 3) {
+        m *= 3;
+        const v = dragonVertebra(target);
+        C.vfx('spark', { x: v.x, y: v.y, a: 0, color: '#ffd27a' });
+      }
+      m *= opts.ranged ? COMPANION_RANGED_MUL : COMPANION_MELEE_MUL;
+    }
     if (b.slowUntil > game.time.tick) m *= 1.1;
-    // заклинания лидера по боссам — вчетверо сильнее (MVP-4: магия должна решать, мана — узкое место)
-    if (opts?.spell) m *= 4;
+    // заклинания лидера по боссам сильнее (магия решает, мана — узкое место)
+    if (opts?.spell) m *= SPELL_BOSS_MUL;
     return m;
   };
   /** Щит памяти: у поезда урон по поселенцам ниже, пока жив Сердце Гнили. */
