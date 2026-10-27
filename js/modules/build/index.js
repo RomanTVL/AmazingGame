@@ -22,9 +22,9 @@
  */
 import { EVENTS } from '../../core/events.js';
 import { Build, OWNER } from './core.js';
-import { BUILD_DEFS } from './defs.js';
+import { BUILD_DEFS, MENU_FLOORS } from './defs.js';
 import { installJobs } from './jobs.js';
-import { installUI } from './ui.js';
+import { installUI, tabOf } from './ui.js';
 import { registerArt } from './art.js';
 import { registerStrings } from './strings.js';
 
@@ -80,6 +80,9 @@ export function register(game) {
           if (!game.ui.isOpen('build')) game.ui.openPanel('build');
           const def = opts.kind === 'floor' ? game.defs.floors.get(opts.id) : game.defs.buildings.get(opts.id);
           B.ui.sel = def ? { kind: opts.kind === 'floor' ? 'floor' : 'building', id: opts.id, def } : null;
+          // меню открывается на вкладке выбранного (обучение: «Мебель» → «Кровать»)
+          const tab = opts.kind === 'floor' ? MENU_FLOORS.find((f) => f.id === opts.id)?.menu : tabOf(def);
+          if (tab) B.ui.tab = tab;
           B.ui.mode = 'place';
           if (Number.isFinite(opts.rot)) B.ui.rot = opts.rot & 3;
         } else {
@@ -88,7 +91,7 @@ export function register(game) {
         }
         return true;
       },
-      getTool: () => ({ mode: B.ui.mode, id: B.ui.sel?.id || null, kind: B.ui.sel?.kind || null, rot: B.ui.rot, zoneSel: B.ui.zoneSel, zoneFilter: B.ui.zoneFilter }),
+      getTool: () => ({ mode: B.ui.mode, id: B.ui.sel?.id || null, kind: B.ui.sel?.kind || null, tab: B.ui.tab, rot: B.ui.rot, zoneSel: B.ui.zoneSel, zoneFilter: B.ui.zoneFilter }),
       setZoneFilter: (zone, filterId) => B.actions.setZoneFilter(zone, filterId),
     },
     OWNER,
