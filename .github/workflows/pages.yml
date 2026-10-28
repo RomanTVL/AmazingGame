@@ -1,0 +1,55 @@
+name: Публикация на GitHub Pages
+
+on:
+  push:
+    branches: [main, claude/keen-fermat-b06xcc]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Headless-симуляция (3 сида)
+        run: |
+          node tests/headless.mjs --days 20 --seed 1
+          node tests/headless.mjs --days 20 --seed 2
+          node tests/headless.mjs --days 20 --seed 3
+      - name: Контракт ядра
+        run: node tests/contract.mjs
+
+  # публикуем только из main (окружение github-pages по умолчанию пускает только основную ветку);
+  # на рабочей ветке — только тесты
+  deploy:
+    needs: test
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Сборка сайта
+        run: |
+          mkdir -p _site
+          cp -r index.html css js _site/
+          [ -d assets ] && cp -r assets _site/ || true
+          touch _site/.nojekyll
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - id: deployment
+        uses: actions/deploy-pages@v4

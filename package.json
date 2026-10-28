@@ -1,0 +1,16 @@
+{
+  "name": "last-train",
+  "version": "0.1.0",
+  "description": "Последний поезд — колония на магическом поезде (RimWorld-like, неон, Canvas 2D, без зависимостей)",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "serve": "node tests/server.mjs",
+    "test:headless": "node tests/headless.mjs --days 10",
+    "test:browser": "node tests/browser.mjs",
+    "test": "node tests/headless.mjs --days 10 && node tests/browser.mjs",
+    "test:contract": "node tests/contract.mjs",
+    "test:playthrough": "node tests/playthrough.mjs"
+  },
+  "license": "UNLICENSED"
+}
