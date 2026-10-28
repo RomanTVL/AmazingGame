@@ -96,7 +96,9 @@ export class Renderer {
       position: 'fixed', left: '0', top: '0', width: '100vw', height: '100vh',
       pointerEvents: 'none', mixBlendMode: blend, display: 'none',
     });
-    this.canvas.after(c);
+    // порядок в DOM = порядок создания: light (multiply) ниже top (интерфейс), иначе ночью тьма накрывает HUD
+    (this._lastOverlay || this.canvas).after(c);
+    this._lastOverlay = c;
     return c;
   }
 

@@ -56,7 +56,7 @@ export const RU = {
     designate: 'C + ЛКМ — пометить (рубить/собрать/добыть), C + ПКМ — снять',
   },
   hud: {
-    day: 'День {day}', paused: 'ПАУЗА', hungry: 'Вы голодны — подойдите к еде и нажмите E', tired: 'Вы устали — лягте спать в вагоне (E)', leader: 'Лидер', heir: 'Наследник', carrying: 'Несёт: {name} ×{count}',
+    day: 'День {day}', paused: 'ПАУЗА', hungry: 'Вы голодны — подойдите к еде и нажмите E', tired: 'Вы устали — лягте спать в вагоне (E)', leader: 'Лидер', mageGuide: 'маг-проводник', heir: 'Наследник', carrying: 'Несёт: {name} ×{count}',
     controls: 'WASD идти · E действие · C+мышь пометить · Пробел пауза · +/− скорость · колесо зум · F9 отладка',
     seasons: { spring: 'весна', summer: 'лето', autumn: 'осень', winter: 'зима' },
   },
@@ -128,7 +128,7 @@ export const EN = {
     designate: 'C + LMB — designate (chop/harvest/mine), C + RMB — clear',
   },
   hud: {
-    day: 'Day {day}', paused: 'PAUSED', hungry: 'You are hungry — walk to food and press E', tired: 'You are tired — sleep inside a wagon (E)', leader: 'Leader', heir: 'Heir', carrying: 'Carrying: {name} ×{count}',
+    day: 'Day {day}', paused: 'PAUSED', hungry: 'You are hungry — walk to food and press E', tired: 'You are tired — sleep inside a wagon (E)', leader: 'Leader', mageGuide: 'mage-conductor', heir: 'Heir', carrying: 'Carrying: {name} ×{count}',
     controls: 'WASD walk · E act · C+mouse designate · Space pause · +/− speed · wheel zoom · F9 debug',
     seasons: { spring: 'spring', summer: 'summer', autumn: 'autumn', winter: 'winter' },
   },

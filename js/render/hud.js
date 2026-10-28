@@ -157,7 +157,7 @@ export function registerCoreHud(game) {
       ctx.arc(box.x + 24, box.y + 22, 6, 0, Math.PI * 2);
       ctx.fill();
       ui.text(p.name, box.x + 40, box.y + 9, { size: 14, bold: true, color: '#ffffff', glow: 6, glowColor: p.color });
-      ui.text(p.mage ? `${t('hud.leader')} · маг-проводник` : t('hud.leader'), box.x + 40, box.y + 27, { size: 11, color: THEME.dim });
+      ui.text(p.mage ? `${t('hud.leader')} · ${t('hud.mageGuide')}` : t('hud.leader'), box.x + 40, box.y + 27, { size: 11, color: THEME.dim });
       const hs = game.api.health.getSummary(p);
       ui.text('❤', box.x + 12, box.y + 44, { size: 11, color: THEME.bad });
       ui.bar(box.x + 26, box.y + 49, 60, 4, hs.ratio, THEME.bad);
