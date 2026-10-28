@@ -16,14 +16,14 @@
  * СОБЫТИЯ: 'journey:departing' {station}, 'journey:travelling' {from, to}, 'journey:arriving' {station},
  *          'journey:arrived' {station}, 'journey:incident' {id}, 'journey:rotAdvance' {level}, 'game:victory' {ending, stats}.
  * API (game.api.journey, от journey): getBiome, getStation, isTravelling, depart, getAmbientTemp; добавлено — canDepart,
- *   departHint, fuelNeed, isMoving, getRoute, choose(step, idx), answer(dialogId?, accept), getState, debugState.
+ *   departHint, fuelNeed, isMoving, getRoute, choose(step, idx), answer(dialogId?, accept), getState (+ bossPending — босс станции впереди или на карте), debugState.
  * Лидер игрока: предупреждения о голоде/усталости, «сам поест/приляжет», если стоит без дела (leader.js).
  */
 import { EVENTS } from '../../core/events.js';
 import { registerDefs } from './defs.js';
 import { registerStrings } from './strings.js';
 import { generateRoute, BOSS_STEP, STEP_BIOME } from './route.js';
-import { createState, stationInfo, targetOption, hours, notify, safe } from './state.js';
+import { createState, stationInfo, targetOption, hours, notify, safe, bossPending } from './state.js';
 import { canDepart, depart, choose, travelTick, wildStop, isTravelling, isMoving, fuelNeed, departHint } from './travel.js';
 import { leaderNeedsTick } from './leader.js';
 import { rotTick, startRotTimer, rotHoursFor, rotHoursLeft } from './rot.js';
@@ -112,6 +112,7 @@ export function register(game) {
     getState: () => ({
       phase: J.S.phase, step: J.S.step, choice: J.S.choice.slice(), leg: J.S.leg ? { ...J.S.leg } : null,
       rotLevel: J.S.rot.level, rotHoursLeft: rotHoursLeft(J), victory: !!J.S.victory, dialogs: J.S.dialogs.length,
+      bossPending: bossPending(J), bossSpawned: !!J.S.boss.spawned, bossAt: J.S.boss.at,
     }),
     debugState: () => J,
   }, OWNER);

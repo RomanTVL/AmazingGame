@@ -21,6 +21,8 @@ const POOLS = {
 /** Длина перегона: 30–60 с реального времени на 1x (3–6 игровых часов). */
 export const LEG_MIN = Math.round(TICKS_PER_HOUR * 3);
 export const LEG_MAX = Math.round(TICKS_PER_HOUR * 6);
+/** Вариантов названия на тип (journey.pname.<type> в strings.js). */
+const NAMES_PER_TYPE = 8;
 
 export function biomeOf(type, step) {
   if (type === 'forest') return 'forest';
@@ -32,6 +34,13 @@ export function biomeOf(type, step) {
 export function generateRoute(rng) {
   const steps = [];
   const legs = [];
+  const used = new Set(); // имена не повторяются за маршрут (те же броски rng — сдвиг на свободное)
+  const uniqueName = (type, idx) => {
+    let k = idx;
+    for (let n = 0; n < NAMES_PER_TYPE && used.has(`${type}:${k}`); n++) k = (k + 1) % NAMES_PER_TYPE;
+    used.add(`${type}:${k}`);
+    return k;
+  };
   for (let step = 1; step <= STEPS; step++) {
     const pool = rng.shuffle(POOLS[step].slice());
     const opts = pool.slice(0, 2).map((type, i) => ({
@@ -41,7 +50,7 @@ export function generateRoute(rng) {
       biome: biomeOf(type, step),
       boss: step === BOSS_STEP ? 'bone_dragon' : null,
       danger: TYPE_DANGER[type] + (step - 1) * 0.4,
-      nameIdx: rng.int(0, 7),
+      nameIdx: uniqueName(type, rng.int(0, NAMES_PER_TYPE - 1)),
     }));
     steps.push(opts);
     legs.push(rng.int(LEG_MIN, LEG_MAX));

@@ -123,6 +123,7 @@ export function register(game) {
         updateFire(g, C);
         updateWards(g, C);
         hornRelease(g, C);
+        armsRelease(g, C);
         cullIfNeeded(g, C);
       }
       if (now % TICKS_PER_HOUR === 0) hourly(g, C);
@@ -387,6 +388,32 @@ function hornRelease(game, C) {
   if (game.time.tick < S.hornUntil) return;
   S.hornUntil = 0;
   for (const p of C.R.colony) if (p.drafted && p.draftMode === 'horn') setDrafted(game, C, p, false);
+}
+
+/** Поднятые «К оружию!» (R/F) сами получают «Отбой», если врагов нет час и босс станции не ожидается. */
+const ARMS_CALM_TICKS = TICKS_PER_HOUR;
+function armsRelease(game, C) {
+  const S = C.S;
+  const drafted = C.R.colony.filter((p) => p.drafted && p.draftMode !== 'horn' && !p.isLeader);
+  if (!drafted.length || C.R.hostiles > 0 || C.R.bossId || bossExpected(game)) {
+    S.calmTicks = 0;
+    return;
+  }
+  S.calmTicks = (S.calmTicks || 0) + 30;
+  if (S.calmTicks < ARMS_CALM_TICKS) return;
+  S.calmTicks = 0;
+  for (const p of drafted) setDrafted(game, C, p, false);
+  game.api.ui.notify(game.t('combat.arms.autoReleased', { n: drafted.length }), { type: 'info' });
+}
+
+/** Босс станции впереди или на карте (journey); без journey — нет. */
+function bossExpected(game) {
+  try {
+    return !!game.api.journey.getState?.()?.bossPending;
+  } catch (err) {
+    game.error(err, 'combat.bossExpected');
+    return false;
+  }
 }
 
 // ---------- Действия E ----------

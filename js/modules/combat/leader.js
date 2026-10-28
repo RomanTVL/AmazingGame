@@ -116,9 +116,21 @@ export function grantXp(game, C, p, amount, reason = '') {
     p.mana.max = maxMana(game, p);
     p.mana.cur = p.mana.max;
     game.events.emit('combat:levelUp', { pawn: p, level: pk.level, reason });
+    if (gameEnded(game)) continue; // победа/конец игры на экране — без тостов «выберите улучшение»
     game.api.ui.notify(game.t('combat.level.up', { name: p.name, level: pk.level }), { type: 'good', pawnId: p.id });
     C.sfx('combat:levelup', p.x, p.y);
     C.vfx('levelup', { x: p.x, y: p.y, targetId: p.id });
+  }
+}
+
+/** Игра окончена (победа или колония пала) — подсказки об уровнях не нужны. */
+export function gameEnded(game) {
+  if (game.colony?.lost) return true;
+  try {
+    return !!game.api.journey.getState?.()?.victory;
+  } catch (err) {
+    game.error(err, 'combat.gameEnded');
+    return false;
   }
 }
 

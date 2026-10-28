@@ -235,6 +235,21 @@ export function hornInput(game, dt) {
   }
 }
 
+/** E в кабине: «[H] Гудок» вместо «Лечь спать» (порядок 85 < 90 у сна). */
+export function registerHornInteraction(game) {
+  game.defs.interactions.add({
+    id: 'train:horn',
+    order: 85,
+    find(g, p, tx, ty) {
+      if (!p?.isLeader || !isInCab(g, p) || !isInLoco(g, { x: tx + 0.5, y: ty + 0.5 })) return null;
+      if (typeof g.api.journey.isTravelling === 'function' && g.api.journey.isTravelling()) return null;
+      const O = ops(g);
+      if (O?.boarding && !O.boarding.auto) return null;
+      return { label: g.t('train.act.horn'), x: tx, y: ty, run: (g2) => shortHorn(g2) };
+    },
+  }, 'train');
+}
+
 function shortHorn(game) {
   hornAt(game, 'short', 'train:horn');
   const O = ops(game);

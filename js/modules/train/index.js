@@ -24,7 +24,7 @@ import { ops, isAboard } from './state.js';
 import { fuelUnits, burnTick, usesFuel, legsLeft, FUEL_MAX, BURN_PER_HOUR } from './fuel.js';
 import { registerFuelHauling } from './haul.js';
 import {
-  isInCab, missingPawns, startBoarding, cancelBoarding, depart, confirmDepart, boardingTick, hornInput, registerBoardingAI,
+  isInCab, missingPawns, startBoarding, cancelBoarding, depart, confirmDepart, boardingTick, hornInput, registerBoardingAI, registerHornInteraction,
   registerDepartPanel, resetHornRuntime,
 } from './horn.js';
 
@@ -35,6 +35,7 @@ export function register(game) {
   registerDefs(game);
   registerScenarios(game);
   registerBoardingAI(game);
+  registerHornInteraction(game);
   registerFuelHauling(game);
   registerDepartPanel(game);
 

@@ -86,6 +86,10 @@ export function register(game) {
   }, OWNER);
   game.events.on(EVENTS.COLONY_STARTED, () => {
     R.hideStartHint = true;
+    R.pendingAutosave = 'start'; // мир за главным меню при запуске не сохраняется (см. кадр)
+  }, OWNER);
+  game.events.on(EVENTS.LOAD_AFTER, () => {
+    R.pendingAutosave = null;
   }, OWNER);
   wireState(game, M);
   wireTutorial(game, M);
@@ -250,6 +254,24 @@ export function register(game) {
   game.events.on(EVENTS.COLONY_STARTED, dropStale, OWNER);
   game.events.on(EVENTS.LOAD_AFTER, dropStale, OWNER);
 
+  // Автосохранение, когда вкладку прячут или закрывают (DOM — только из кадра, не из register()).
+  const hookPageHide = (g) => {
+    if (R.pageHideHooked || typeof document === 'undefined' || typeof window === 'undefined') return;
+    R.pageHideHooked = true;
+    const saveNow = () => {
+      if (!g.map || g.colony?.lost || R.screen.some((id) => id === 'main' || id === 'over' || id === 'victory')) return;
+      try {
+        if (g.save.saveSlot('auto') > 0) R.slotsCache = null;
+      } catch (err) {
+        console.warn('[ui] автосохранение при скрытии вкладки не удалось:', err?.message || err);
+      }
+    };
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') saveNow();
+    });
+    window.addEventListener('pagehide', saveNow);
+  };
+
   // ---------- Кадр: захват ввода экранами, автосохранение, обучение ----------
   game.frameSystems.add({
     id: 'ui:capture',
@@ -261,6 +283,7 @@ export function register(game) {
       if (!R.booted) {
         R.booted = true;
         if (!g.isHeadless && menuAtBoot()) act.only('main');
+        if (!g.isHeadless) hookPageHide(g);
       }
       if (R.screen.length && !g.isHeadless) {
         if (inp.textCapture === null) inp.captureText('ui');
@@ -281,8 +304,9 @@ export function register(game) {
         if (inp.textCapture === 'ui' && !M.kit.textFocus) inp.releaseText();
         if (!g.isHeadless) panelSync();
       }
-      // автосохранение по прибытии на станцию
-      if (R.pendingAutosave && g.map && !g.colony.lost) {
+      // автосохранение: начало игры и прибытие на станцию (за главным меню — не сохраняем: это фон, не игра)
+      if (R.pendingAutosave && R.screen.includes('main')) R.pendingAutosave = null;
+      if (R.pendingAutosave && g.map && !g.colony.lost && !R.screen.length) {
         R.pendingAutosave = null;
         const bytes = g.save.saveSlot('auto');
         R.slotsCache = null;

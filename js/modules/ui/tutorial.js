@@ -12,7 +12,7 @@ export const STEPS = [
   { id: 'move', key: 'WASD', actions: ['player:up', 'player:down', 'player:left', 'player:right'] },
   { id: 'chop', key: 'E' },
   { id: 'bed', key: 'B' },
-  { id: 'arms', key: 'R', actions: ['player:callToArms'] },
+  { id: 'arms', key: 'R' }, // засчитывается, только если кто-то откликнулся ('combat:callToArms' {count > 0})
   { id: 'horn', key: 'H' }, // засчитывается только настоящим гудком из кабины ('journey:horn')
   { id: 'route', key: 'F4' },
 ];
@@ -71,7 +71,9 @@ export function wireTutorial(game, M) {
     const id = String(entity?.buildDefId || entity?.defId || '');
     if (/bed/.test(id)) markDone(M, 'bed');
   });
-  on(EVENTS.PLAYER_CALL_TO_ARMS, () => markDone(M, 'arms'));
+  on('combat:callToArms', ({ count } = {}) => {
+    if (count > 0) markDone(M, 'arms');
+  });
   on(EVENTS.JOURNEY_HORN, () => markDone(M, 'horn'));
   on(EVENTS.UI_PANEL_OPENED, ({ id } = {}) => {
     if (id === 'route') markDone(M, 'route');
