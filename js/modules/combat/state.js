@@ -13,7 +13,7 @@ export function createSaved() {
     threads: [], // нити Лича: [{lichId, pawnId, hp}]
     wards: [], // обереги вагонов: [{carId, untilTick}]
     hornUntil: 0, // «к оружию» по гудку (тик, после которого можно отпустить, если тихо)
-    calmTicks: 0,
+    calmTicks: 0, // тиков без врагов при поднятых «К оружию!» (авто-«Отбой» через час)
   };
 }
 

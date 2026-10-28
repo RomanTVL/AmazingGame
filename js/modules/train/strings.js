@@ -11,6 +11,7 @@ export function registerStrings(game) {
           desc: 'Маг-проводник и двое уцелевших. Паровоз, тендер, склад и жилой вагон. Угля — перегона на три, еды — дней на десять.',
         },
       },
+      act: { horn: '[H] Гудок — посадка' },
       horn: {
         cabOnly: 'Гудок — только из кабины машиниста.',
         boarding: 'Гудок! Посадка — {sec} с. Все к поезду!',
@@ -57,6 +58,7 @@ export function registerStrings(game) {
           desc: 'A conductor-mage and two survivors. Steam engine, tender, storage and living car. Coal for about three legs, food for about ten days.',
         },
       },
+      act: { horn: '[H] Horn — boarding' },
       horn: {
         cabOnly: 'The horn works only from the cab.',
         boarding: 'Horn! Boarding — {sec} s. Everyone to the train!',

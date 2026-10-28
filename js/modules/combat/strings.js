@@ -50,6 +50,7 @@ const ru = {
     turret: { empty: 'Рунная турель без зарядов — нужны кристаллы маны.' },
     arms: {
       released: 'Отбой: {n} вернулись к делам.',
+      autoReleased: 'Тихо уже час — отбой: {n} вернулись к делам.',
       called: '«К оружию!» — откликнулись {n}.',
       nobody: 'Никто не услышал призыва.',
       shout: ['К оружию!', 'Все ко мне!', 'Держать строй!'],
@@ -194,7 +195,7 @@ const en = {
     fire: { started: 'Fire: {name} is burning!' },
     turret: { empty: 'A rune turret is out of charges — bring mana crystals.' },
     arms: {
-      released: 'At ease: {n} back to work.', called: '"To arms!" — {n} answered.', nobody: 'Nobody heard the call.',
+      released: 'At ease: {n} back to work.', autoReleased: 'Quiet for an hour — at ease: {n} back to work.', called: '"To arms!" — {n} answered.', nobody: 'Nobody heard the call.',
       shout: ['To arms!', 'To me!', 'Hold the line!'], horn: 'Double horn: everyone to the doors and windows! ({n})',
       yes: ['Coming!', 'Here.', 'With you.'], at_ease: ['Got it.', 'Heading back.', 'Fine.'],
     },

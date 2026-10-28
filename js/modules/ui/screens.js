@@ -7,6 +7,7 @@ import { call, isReal, nameOf, savedAtText } from './util.js';
 import { TUTORIAL_SETTING } from './tutorial.js';
 
 const BTN_H = 44;
+const PANEL_BG = '#0e1226'; // как C.bg2, но без прозрачности
 
 export function drawScreens(ctx, game, M, view) {
   const R = M.R;
@@ -55,7 +56,8 @@ function drawMsg(game, M, W, H) {
 function centerPanel(M, W, H, w, h, title, accent = C.line, titleColor = C.cyan) {
   const x = Math.round((W - w) / 2);
   const y = Math.round(Math.max(20, (H - h) / 2));
-  const r = M.kit.panel(x, y, w, h, { title, accent, titleColor, titleSize: 18, bg: C.bg2 });
+  // непрозрачная подложка: игра, тосты и подписи под экраном не просвечивают сквозь текст
+  const r = M.kit.panel(x, y, w, h, { title, accent, titleColor, titleSize: 18, bg: PANEL_BG });
   return { ...r, px: x, py: y, pw: w, ph: h };
 }
 

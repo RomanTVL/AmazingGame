@@ -8,7 +8,7 @@ import { rgba, mix, lighten } from '../../render/color.js';
 import { drawPawnBody } from '../../render/pawns.js';
 import { roundRect } from '../../engine/ui.js';
 import { gearSprite, hasStaff, weaponStats } from './items.js';
-import { SPELLS, activeSlots, xpForLevel, chooseUpgrade, cycleSlot, upgradeDef } from './leader.js';
+import { SPELLS, activeSlots, xpForLevel, chooseUpgrade, cycleSlot, upgradeDef, gameEnded } from './leader.js';
 import { FACTIONS } from './enemies.js';
 import { AMMO_PER_CRYSTAL } from './defense.js';
 import { VERTEBRA_OFF } from './bosses.js';
@@ -1501,7 +1501,7 @@ export function registerRender(game, C) {
   registerTooltips(game, C);
   // новый уровень — открыть карточки (только в браузере)
   game.events.on('combat:levelUp', ({ pawn }) => {
-    if (!game.isHeadless && pawn?.perks?.cards?.length && !game.ui.modalOpen) game.ui.openPanel('combat_levelup');
+    if (!game.isHeadless && pawn?.perks?.cards?.length && !game.ui.modalOpen && !gameEnded(game)) game.ui.openPanel('combat_levelup');
   }, 'combat');
   void dist;
   void hasStaff;

@@ -71,6 +71,9 @@ export function diff(J) {
 
 export const isFinal = (J) => J.S.step >= BOSS_STEP;
 
+/** Босс станции ещё впереди или на карте (стоим на станции босса, он не побеждён). */
+export const bossPending = (J) => J.S.phase === 'station' && J.S.step >= BOSS_STEP && !J.S.boss.defeated && !J.S.victory;
+
 export function safe(J, where, fn, def = null) {
   try {
     const v = fn();

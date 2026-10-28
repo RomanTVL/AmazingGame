@@ -293,7 +293,10 @@ export function registerUI(J) {
     ctx.stroke();
     ctx.globalAlpha = o.dim ? 0.45 : 1;
     ui.text(o.sub, x + 8, y + 7, { size: 11, bold: true, color: o.color });
-    ui.text(clip(ui, o.title, w - 16, 13), x + 8, y + 24, { size: 13, bold: true, color: T.text });
+    // название: мельче, если не влезает; многоточие — только если не влезло и мелким шрифтом
+    let ts = 13;
+    while (ts > 10 && ui.measure(o.title, ts, true) > w - 16) ts--;
+    ui.text(clip(ui, o.title, w - 16, ts), x + 8, y + 24 + (13 - ts), { size: ts, bold: true, color: T.text });
     if (o.desc) wrap(ui, o.desc, x + 8, y + 46, w - 16, 11, 14, 3, T.dim);
     if (o.boss) ui.text(`☠ ${o.boss}`, x + 8, y + h - 18, { size: 11, bold: true, color: T.bad });
     else if (o.current) ui.text(J.game.t('journey.route.here'), x + 8, y + h - 18, { size: 11, bold: true, color: T.accent });

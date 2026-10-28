@@ -4,7 +4,7 @@
 import { dist, distToSegment, lineTiles, clamp } from '../../core/math.js';
 import { TICKS_PER_DAY } from '../../core/constants.js';
 import { makeEnemy, newRaid, findEntry, raidOf, isActiveFoe } from './enemies.js';
-import { dealDamage, pickPart, damageBuilding, spawnProjectile } from './fight.js';
+import { dealDamage, pickPart, damageBuilding, spawnProjectile, isHealthStub } from './fight.js';
 import { engage, approach, nearestHostile } from './ai.js';
 import { spawnGear } from './items.js';
 import { secs } from './state.js';
@@ -267,8 +267,11 @@ function dragonTick(game, C, p, b, now, dt) {
     return 'running';
   }
   let t = game.entities.get(p._tgt);
-  if (!t || t.dead || t.downed || (now + p.id) % 30 === 0) {
+  if (!t || t.dead || t.removed || t.downed || (now + p.id) % 30 === 0) {
     t = nearestHostile(game, C, p, { maxD: 80 });
+    // на ногах никого — добивает упавших (иначе бой зависает: все лежат, дракон кружит без цели);
+    // с заглушкой health упавшие сами встают — там не нужно
+    if (!t && !isHealthStub(game)) t = nearestHostile(game, C, p, { maxD: 80, allowDowned: true });
     p._tgt = t?.id || 0;
   }
   if (now >= b.breathAt && t) {

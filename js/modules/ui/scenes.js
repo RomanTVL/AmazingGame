@@ -1,8 +1,8 @@
 // Декоративные сцены экранов (только отрисовка, браузер): ночной лес с идущим поездом (главное меню),
 // поезд в профиль, ночной перрон с фонарями и силуэтами («Перрон отбора»). Случайность — хеши (раскладка)
 // и Math.random (частицы дыма/искр — косметика).
-import { sprite } from '../../engine/assets.js';
-import { drawGlow } from '../../render/glow.js';
+import { sprite, makeCanvas } from '../../engine/assets.js';
+import { drawGlow, glowSprite } from '../../render/glow.js';
 import { rgba, mix } from '../../render/color.js';
 import { hash01 } from '../../core/math.js';
 import { roundRect } from '../../engine/ui.js';
@@ -68,9 +68,10 @@ function starField(w, h) {
   });
 }
 
-function tiled(ctx, img, offset, y, viewW) {
+function tiled(ctx, img, offset, y, viewW, snap = false) {
   const w = img.width;
   let x = -(((offset % w) + w) % w);
+  if (snap) x = Math.floor(x); // целые пиксели: без шва между плитками и без дорогой фильтрации
   for (; x < viewW; x += w) ctx.drawImage(img, x, y);
 }
 
@@ -309,142 +310,166 @@ function drawLoco(ctx, fx, ry, sc, t, wheelA, dim, o) {
 }
 
 // ---------- Главное меню: ночной лес и поезд ----------
+// Производительность (программный растр headless-Chromium: градиенты, масштаб и дробные координаты в drawImage
+// в ~10 раз дороже целочисленного копирования 1:1): статичные слои — кэш-канвасы на размер экрана (небо со
+// звёздами и луной — непрозрачный; сияние перерисовывается в него ~10 раз в секунду; насыпь с рельсами;
+// виньетка); дымка запечена в полосу дальнего леса, туман — в полосу кустарника (наложение «поверх»
+// ассоциативно — картинка та же); полосы и свечения дыма/тумана/рун — в целых пикселях без масштаба.
+const FW = 1400;
+const FAR = { color: '#140f30', rim: 'rgba(120,90,220,0.35)', density: 1.6, minH: 0.45, maxH: 0.95, seed: 3 };
+const MID = { color: '#090718', rim: 'rgba(94,242,255,0.22)', density: 1.1, minH: 0.5, maxH: 1, seed: 9 };
+const NEAR = { color: '#030209', rim: 'rgba(108,92,255,0.18)', density: 2.2, minH: 0.25, maxH: 0.7, seed: 17 };
+const AURORA_DT = 0.1; // с: сияние ползёт медленно (≤ 7 px/с) — перерисовка 10 раз в секунду незаметна
+
+/** Масштаб контекста (dpr) — кэши рисуются в пикселях устройства. */
+function ctxScale(ctx) {
+  const a = ctx.getTransform?.().a;
+  return Number.isFinite(a) && a > 0 ? Math.min(2, a) : 1;
+}
+
+/** Кэш-слой экрана: draw(ctx) рисует в координатах экрана (CSS px), полоса [y0, y0 + hh) по высоте. */
+function screenLayer(key, w, hh, y0, s, draw) {
+  return sprite(`ui:menu:${key}:${w}:${hh}:${y0}:${s}`, w * s, hh * s, (ctx) => {
+    ctx.setTransform(s, 0, 0, s, 0, -y0 * s);
+    draw(ctx);
+  });
+}
+
+/** Свой непрозрачный канвас размера экрана (копируется без смешивания). */
+function opaqueCanvas(holder, key, w, h, s) {
+  const cw = Math.max(1, Math.ceil(w * s));
+  const ch = Math.max(1, Math.ceil(h * s));
+  let e = holder[key];
+  if (!e || e.c.width !== cw || e.c.height !== ch) {
+    const c = makeCanvas(cw, ch);
+    e = holder[key] = { c, ctx: c.getContext('2d', { alpha: false }), at: -1e9 };
+  }
+  e.ctx.setTransform(s, 0, 0, s, 0, 0);
+  return e;
+}
+
+/** Свечение без масштабирования: спрайт (радиус кратен 8) в целых пикселях; мелкие (заметна разница
+ * радиусов) — обычным drawGlow, они дешёвые. */
+function glowPx(ctx, x, y, r, color, alpha) {
+  if (!(alpha > 0.01) || !(r > 0)) return;
+  const sp = glowSprite(color, r);
+  const R = sp.width / 2;
+  if (R > r * 1.15) return drawGlow(ctx, x, y, r, color, alpha);
+  const prevOp = ctx.globalCompositeOperation;
+  const prevA = ctx.globalAlpha;
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.globalAlpha = prevA * Math.min(1, alpha);
+  ctx.drawImage(sp, Math.round(x - R), Math.round(y - R));
+  ctx.globalAlpha = prevA;
+  ctx.globalCompositeOperation = prevOp;
+}
+
 export class MenuScene {
   constructor() {
     this.smoke = [];
     this.sparks = [];
     this.smokeT = 0;
     this.flies = [];
+    this.canv = {};
     for (let i = 0; i < 18; i++) this.flies.push({ x: Math.random(), y: 0.55 + Math.random() * 0.4, p: Math.random() * 10, s: 0.4 + Math.random() });
   }
 
   draw(ctx, w, h, t, dt) {
+    const s = ctxScale(ctx);
     const horizon = h * 0.66;
-    // небо
-    const sky = ctx.createLinearGradient(0, 0, 0, horizon);
-    sky.addColorStop(0, '#03040d');
-    sky.addColorStop(0.55, '#0b0a26');
-    sky.addColorStop(1, '#251040');
-    ctx.fillStyle = sky;
-    ctx.fillRect(0, 0, w, h);
-    const sw = Math.ceil(w / 100) * 100;
-    const sh = Math.ceil(horizon / 50) * 50;
-    ctx.globalAlpha = 0.9;
-    ctx.drawImage(starField(sw, sh), 0, 0);
-    ctx.globalAlpha = 1;
+    // небо, звёзды, луна (статично) + северное сияние (перерисовка ~10 раз/с)
+    const sky = opaqueCanvas(this.canv, 'sky', w, h, s);
+    if (Math.abs(t - sky.at) >= AURORA_DT) {
+      sky.at = t;
+      const c = sky.ctx;
+      c.drawImage(screenLayer('sky', w, h, 0, s, (x) => drawSky(x, w, h, horizon)), 0, 0, w, h);
+      drawAurora(c, w, h, t);
+      drawMoon(c, w, h);
+    }
+    ctx.drawImage(sky.c, 0, 0, w, h);
     // мерцающие звёзды
     for (let i = 0; i < 9; i++) {
       const x = hash01(i, 21, 5) * w;
       const y = hash01(i, 22, 5) * horizon * 0.7;
-      drawGlow(ctx, x, y, 7, '#cfe0ff', 0.25 + 0.25 * Math.sin(t * (1 + i * 0.3) + i));
+      glowPx(ctx, x, y, 7, '#cfe0ff', 0.25 + 0.25 * Math.sin(t * (1 + i * 0.3) + i));
     }
-    // северное сияние
-    ctx.save();
-    ctx.globalCompositeOperation = 'lighter';
-    for (let b = 0; b < 2; b++) {
-      const col = b ? '#ff4fd8' : '#3dffc5';
-      ctx.beginPath();
-      const base = h * (0.2 + b * 0.07);
-      ctx.moveTo(0, base);
-      for (let x = 0; x <= w; x += w / 24) ctx.lineTo(x, base + Math.sin(x * 0.004 + t * 0.15 + b) * h * 0.04 + Math.sin(x * 0.011 - t * 0.1) * h * 0.015);
-      ctx.lineTo(w, base + h * 0.12);
-      ctx.lineTo(0, base + h * 0.12);
-      ctx.closePath();
-      const g = ctx.createLinearGradient(0, base - h * 0.02, 0, base + h * 0.12);
-      g.addColorStop(0, rgba(col, 0));
-      g.addColorStop(0.3, rgba(col, 0.06));
-      g.addColorStop(1, rgba(col, 0));
-      ctx.fillStyle = g;
-      ctx.fill();
-    }
-    ctx.restore();
-    // луна
-    const mx = w * 0.8;
-    const my = h * 0.17;
-    const mr = h * 0.045;
-    drawGlow(ctx, mx, my, mr * 7, '#9fb8ff', 0.35);
-    drawGlow(ctx, mx, my, mr * 2.4, '#e6eeff', 0.5);
-    ctx.fillStyle = '#eef3ff';
-    ctx.beginPath();
-    ctx.arc(mx, my, mr, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = '#0d0b26';
-    ctx.beginPath();
-    ctx.arc(mx + mr * 0.45, my - mr * 0.2, mr * 0.92, 0, Math.PI * 2);
-    ctx.fill();
-    // дальний лес
-    const fw = 1400;
+    // дальний лес + дымка у горизонта
     const farH = Math.ceil((h * 0.3) / 20) * 20;
-    tiled(ctx, forestStrip('far', fw, farH, { color: '#140f30', rim: 'rgba(120,90,220,0.35)', density: 1.6, minH: 0.45, maxH: 0.95, seed: 3 }), t * 14, horizon - farH + h * 0.02, w);
-    // дымка у горизонта
-    const mist = ctx.createLinearGradient(0, horizon - h * 0.1, 0, horizon + h * 0.06);
-    mist.addColorStop(0, 'rgba(120,80,200,0)');
-    mist.addColorStop(0.6, 'rgba(120,80,200,0.16)');
-    mist.addColorStop(1, 'rgba(40,20,80,0)');
-    ctx.fillStyle = mist;
-    ctx.fillRect(0, horizon - h * 0.1, w, h * 0.16);
+    const farY = Math.floor(horizon - farH + h * 0.02);
+    const farHH = Math.ceil(horizon + h * 0.06) - farY;
+    const far = sprite(`ui:menu:far:${h}:${farH}`, FW, farHH, (c) => {
+      c.drawImage(forestStrip('far', FW, farH, FAR), 0, horizon - farH + h * 0.02 - farY);
+      c.translate(0, -farY);
+      const mist = c.createLinearGradient(0, horizon - h * 0.1, 0, horizon + h * 0.06);
+      mist.addColorStop(0, 'rgba(120,80,200,0)');
+      mist.addColorStop(0.6, 'rgba(120,80,200,0.16)');
+      mist.addColorStop(1, 'rgba(40,20,80,0)');
+      c.fillStyle = mist;
+      c.fillRect(0, horizon - h * 0.1, FW, h * 0.16);
+    });
+    tiled(ctx, far, t * 14, farY, w, true);
     // ближний лес
     const midH = Math.ceil((h * 0.36) / 20) * 20;
-    tiled(ctx, forestStrip('mid', fw, midH, { color: '#090718', rim: 'rgba(94,242,255,0.22)', density: 1.1, minH: 0.5, maxH: 1, seed: 9 }), t * 46, h * 0.76 - midH, w);
-    // насыпь
+    tiled(ctx, forestStrip('mid', FW, midH, MID), t * 46, Math.round(h * 0.76 - midH), w, true);
+    // насыпь и рельсы — статичный слой; шпалы бегут
     const ry = h * 0.83;
-    ctx.fillStyle = '#05040c';
-    ctx.fillRect(0, h * 0.75, w, h * 0.25);
-    const grd = ctx.createLinearGradient(0, h * 0.75, 0, ry);
-    grd.addColorStop(0, 'rgba(60,40,120,0.18)');
-    grd.addColorStop(1, 'rgba(0,0,0,0)');
-    ctx.fillStyle = grd;
-    ctx.fillRect(0, h * 0.75, w, ry - h * 0.75);
-    // шпалы и рельсы
+    const gY = Math.floor(h * 0.75);
+    ctx.drawImage(screenLayer('ground', w, h - gY, gY, s, (c) => drawGround(c, w, h, ry)), 0, gY, w, h - gY);
     const speed = 260;
     const off = (t * speed) % 28;
     ctx.fillStyle = '#16122a';
     for (let x = -off; x < w; x += 28) ctx.fillRect(x, ry + 1, 16, 6);
-    ctx.fillStyle = '#3a3f66';
-    ctx.fillRect(0, ry - 1, w, 2);
-    ctx.fillStyle = rgba('#5ef2ff', 0.35);
-    ctx.fillRect(0, ry - 2, w, 1);
     // руны на рельсах
     for (let k = 0; k < 10; k++) {
       const x = ((k * 197 - t * speed) % (w + 200) + w + 200) % (w + 200) - 100;
-      drawGlow(ctx, x, ry, 12, '#5ef2ff', 0.25);
+      glowPx(ctx, x, ry, 12, '#5ef2ff', 0.25);
     }
     // поезд
     const sc = Math.max(0.6, Math.min(1.6, h / 620));
     const fx = w * 0.74;
     const wheelA = t * speed / (13 * sc);
     drawTrainSide(ctx, fx, ry, sc, t, { moving: true, wagons: Math.ceil((fx / (160 * sc))) + 1, wheel: wheelA });
-    this._particles(ctx, fx, ry, sc, t, dt, w, h);
-    // передний план: низкий кустарник у насыпи (быстро уходит назад, не перекрывает заголовок и кнопки)
+    this._particles(ctx, fx, ry, sc, t, dt);
+    // передний план: низкий кустарник у насыпи (быстро уходит назад) + туман снизу — одна полоса
     const nearH = Math.ceil((h * 0.12) / 20) * 20;
-    ctx.globalAlpha = 0.85;
-    tiled(ctx, forestStrip('near', fw, nearH, { color: '#030209', rim: 'rgba(108,92,255,0.18)', density: 2.2, minH: 0.25, maxH: 0.7, seed: 17 }), t * 520, h - nearH + 4, w);
-    ctx.globalAlpha = 1;
-    // туман снизу
-    const fog = ctx.createLinearGradient(0, h * 0.82, 0, h);
-    fog.addColorStop(0, 'rgba(30,24,60,0)');
-    fog.addColorStop(1, 'rgba(30,24,60,0.55)');
-    ctx.fillStyle = fog;
-    ctx.fillRect(0, h * 0.82, w, h * 0.18);
+    const fogY = Math.floor(h * 0.82);
+    const nearHH = h + 4 - fogY;
+    const near = sprite(`ui:menu:near:${h}:${nearH}`, FW, nearHH, (c) => {
+      c.globalAlpha = 0.85;
+      c.drawImage(forestStrip('near', FW, nearH, NEAR), 0, h - nearH + 4 - fogY);
+      c.globalAlpha = 1;
+      c.translate(0, -fogY);
+      const fog = c.createLinearGradient(0, h * 0.82, 0, h);
+      fog.addColorStop(0, 'rgba(30,24,60,0)');
+      fog.addColorStop(1, 'rgba(30,24,60,0.55)');
+      c.fillStyle = fog;
+      c.fillRect(0, h * 0.82, FW, h * 0.18);
+      c.fillStyle = 'rgba(30,24,60,0.55)';
+      c.fillRect(0, h, FW, 4);
+    });
+    tiled(ctx, near, t * 520, fogY, w, true);
+    // клубы тумана
     for (let k = 0; k < 6; k++) {
       const x = ((k * 330 - t * 30) % (w + 400) + w + 400) % (w + 400) - 200;
-      drawGlow(ctx, x, h * (0.9 + 0.03 * Math.sin(k + t * 0.2)), 220, '#3a2d6a', 0.22);
+      glowPx(ctx, x, h * (0.9 + 0.03 * Math.sin(k + t * 0.2)), 220, '#3a2d6a', 0.22);
     }
     // светлячки
     for (const f of this.flies) {
       const x = ((f.x * w + Math.sin(t * 0.3 * f.s + f.p) * 60) % w + w) % w;
       const y = f.y * h + Math.sin(t * 0.7 * f.s + f.p * 2) * 18;
-      drawGlow(ctx, x, y, 9, '#d6ff7a', 0.25 + 0.35 * Math.max(0, Math.sin(t * 1.3 * f.s + f.p)));
+      glowPx(ctx, x, y, 9, '#d6ff7a', 0.25 + 0.35 * Math.max(0, Math.sin(t * 1.3 * f.s + f.p)));
     }
-    // виньетка
-    const vg = ctx.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.35, w / 2, h / 2, Math.max(w, h) * 0.75);
-    vg.addColorStop(0, 'rgba(0,0,0,0)');
-    vg.addColorStop(1, 'rgba(0,0,0,0.6)');
-    ctx.fillStyle = vg;
-    ctx.fillRect(0, 0, w, h);
+    // виньетка — статичный слой
+    ctx.drawImage(screenLayer('vignette', w, h, 0, s, (c) => {
+      const vg = c.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.35, w / 2, h / 2, Math.max(w, h) * 0.75);
+      vg.addColorStop(0, 'rgba(0,0,0,0)');
+      vg.addColorStop(1, 'rgba(0,0,0,0.6)');
+      c.fillStyle = vg;
+      c.fillRect(0, 0, w, h);
+    }), 0, 0, w, h);
   }
 
-  _particles(ctx, fx, ry, sc, t, dt, w, h) {
+  _particles(ctx, fx, ry, sc, t, dt) {
     const d = Math.min(0.05, Math.max(0, dt || 0.016));
     this.smokeT += d;
     while (this.smokeT > 0.07) {
@@ -464,7 +489,7 @@ export class MenuScene {
       p.vy *= 0.985;
       p.r += 16 * sc * d;
       const a = (1 - p.life / p.max) * 0.22;
-      drawGlow(ctx, p.x, p.y, p.r * 2.2, '#8a7ac8', a);
+      glowPx(ctx, p.x, p.y, p.r * 2.2, '#8a7ac8', a);
     }
     for (let i = this.sparks.length - 1; i >= 0; i--) {
       const p = this.sparks[i];
@@ -476,13 +501,82 @@ export class MenuScene {
       p.x += p.vx * d;
       p.y += p.vy * d;
       p.vy += 300 * d;
-      drawGlow(ctx, p.x, p.y, 5, '#ffb347', 1 - p.life / p.max);
+      glowPx(ctx, p.x, p.y, 5, '#ffb347', 1 - p.life / p.max);
     }
     if (this.smoke.length > 80) this.smoke.splice(0, this.smoke.length - 80);
     if (this.sparks.length > 60) this.sparks.splice(0, this.sparks.length - 60);
-    void w;
-    void h;
+    void t;
   }
+}
+
+function drawSky(ctx, w, h, horizon) {
+  const sky = ctx.createLinearGradient(0, 0, 0, horizon);
+  sky.addColorStop(0, '#03040d');
+  sky.addColorStop(0.55, '#0b0a26');
+  sky.addColorStop(1, '#251040');
+  ctx.fillStyle = sky;
+  ctx.fillRect(0, 0, w, h);
+  const sw = Math.ceil(w / 100) * 100;
+  const sh = Math.ceil(horizon / 50) * 50;
+  ctx.globalAlpha = 0.9;
+  ctx.drawImage(starField(sw, sh), 0, 0);
+  ctx.globalAlpha = 1;
+  // луна
+  const mx = w * 0.8;
+  const my = h * 0.17;
+  const mr = h * 0.045;
+  drawGlow(ctx, mx, my, mr * 7, '#9fb8ff', 0.35);
+  drawGlow(ctx, mx, my, mr * 2.4, '#e6eeff', 0.5);
+}
+
+/** Диск луны (поверх сияния). */
+function drawMoon(ctx, w, h) {
+  const mx = w * 0.8;
+  const my = h * 0.17;
+  const mr = h * 0.045;
+  ctx.fillStyle = '#eef3ff';
+  ctx.beginPath();
+  ctx.arc(mx, my, mr, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#0d0b26';
+  ctx.beginPath();
+  ctx.arc(mx + mr * 0.45, my - mr * 0.2, mr * 0.92, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function drawAurora(ctx, w, h, t) {
+  ctx.globalCompositeOperation = 'lighter';
+  for (let b = 0; b < 2; b++) {
+    const col = b ? '#ff4fd8' : '#3dffc5';
+    ctx.beginPath();
+    const base = h * (0.2 + b * 0.07);
+    ctx.moveTo(0, base);
+    for (let x = 0; x <= w; x += w / 24) ctx.lineTo(x, base + Math.sin(x * 0.004 + t * 0.15 + b) * h * 0.04 + Math.sin(x * 0.011 - t * 0.1) * h * 0.015);
+    ctx.lineTo(w, base + h * 0.12);
+    ctx.lineTo(0, base + h * 0.12);
+    ctx.closePath();
+    const g = ctx.createLinearGradient(0, base - h * 0.02, 0, base + h * 0.12);
+    g.addColorStop(0, rgba(col, 0));
+    g.addColorStop(0.3, rgba(col, 0.06));
+    g.addColorStop(1, rgba(col, 0));
+    ctx.fillStyle = g;
+    ctx.fill();
+  }
+  ctx.globalCompositeOperation = 'source-over';
+}
+
+function drawGround(ctx, w, h, ry) {
+  ctx.fillStyle = '#05040c';
+  ctx.fillRect(0, h * 0.75, w, h * 0.25);
+  const grd = ctx.createLinearGradient(0, h * 0.75, 0, ry);
+  grd.addColorStop(0, 'rgba(60,40,120,0.18)');
+  grd.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = grd;
+  ctx.fillRect(0, h * 0.75, w, ry - h * 0.75);
+  ctx.fillStyle = '#3a3f66';
+  ctx.fillRect(0, ry - 1, w, 2);
+  ctx.fillStyle = rgba('#5ef2ff', 0.35);
+  ctx.fillRect(0, ry - 2, w, 1);
 }
 
 // ---------- Перрон отбора ----------
